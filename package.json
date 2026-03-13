@@ -1,0 +1,33 @@
+{
+  "name": "second-hand-book-marketplace",
+  "version": "1.0.0",
+  "description": "Second-Hand Academic Book Marketplace - Monorepo",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "build:backend": "npm run build --workspace=backend",
+    "build:frontend": "npm run build --workspace=frontend",
+    "verify:supabase": "ts-node scripts/verify-supabase-setup.ts",
+    "verify:oauth": "ts-node scripts/verify-oauth-setup.ts",
+    "verify:storage": "ts-node scripts/verify-storage-setup.ts",
+    "verify:meilisearch": "ts-node scripts/verify-meilisearch-setup.ts",
+    "verify:meilisearch:config": "ts-node scripts/verify-meilisearch-config.ts",
+    "verify:foundation": "ts-node scripts/verify-foundation-setup.ts"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.99.1",
+    "@types/node": "^20.19.37",
+    "concurrently": "^8.2.2",
+    "dotenv": "^16.6.1",
+    "meilisearch": "^0.55.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
