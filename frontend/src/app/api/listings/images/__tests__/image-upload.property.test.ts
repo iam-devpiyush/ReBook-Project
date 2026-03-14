@@ -86,7 +86,7 @@ function createMockFile(name: string, type: string, size: number): File {
 // ============================================================================
 
 describe('Image Upload Constraints - Property Tests', () => {
-  
+
   /**
    * Property 1: Valid Image Files Pass Validation
    * 
@@ -104,10 +104,10 @@ describe('Image Upload Constraints - Property Tests', () => {
         (mimeType, fileSize, fileName) => {
           // Arrange
           const file = createMockFile(fileName, mimeType, fileSize);
-          
+
           // Act
           const result = validateImageFile(file);
-          
+
           // Assert
           expect(result.valid).toBe(true);
           expect(result.error).toBeUndefined();
@@ -116,7 +116,7 @@ describe('Image Upload Constraints - Property Tests', () => {
       { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property 2: Invalid MIME Types Fail Validation
    * 
@@ -134,10 +134,10 @@ describe('Image Upload Constraints - Property Tests', () => {
         (mimeType, fileSize, fileName) => {
           // Arrange
           const file = createMockFile(fileName, mimeType, fileSize);
-          
+
           // Act
           const result = validateImageFile(file);
-          
+
           // Assert
           expect(result.valid).toBe(false);
           expect(result.error).toBeDefined();
@@ -147,7 +147,7 @@ describe('Image Upload Constraints - Property Tests', () => {
       { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property 3: Files Exceeding 5MB Fail Validation
    * 
@@ -165,10 +165,10 @@ describe('Image Upload Constraints - Property Tests', () => {
         (mimeType, fileSize, fileName) => {
           // Arrange
           const file = createMockFile(fileName, mimeType, fileSize);
-          
+
           // Act
           const result = validateImageFile(file);
-          
+
           // Assert
           expect(result.valid).toBe(false);
           expect(result.error).toBeDefined();
@@ -178,7 +178,7 @@ describe('Image Upload Constraints - Property Tests', () => {
       { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property 4: Generated File Paths Are Unique
    * 
@@ -198,7 +198,7 @@ describe('Image Upload Constraints - Property Tests', () => {
           // Act
           const path1 = generateFilePath(userId, listingId, imageType, fileName);
           const path2 = generateFilePath(userId, listingId, imageType, fileName);
-          
+
           // Assert
           expect(path1).not.toBe(path2);
         }
@@ -206,7 +206,7 @@ describe('Image Upload Constraints - Property Tests', () => {
       { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property 5: File Path Structure Is Consistent
    * 
@@ -225,7 +225,7 @@ describe('Image Upload Constraints - Property Tests', () => {
         (userId, listingId, imageType, fileName) => {
           // Act
           const filePath = generateFilePath(userId, listingId, imageType, fileName);
-          
+
           // Assert
           const parts = filePath.split('/');
           expect(parts).toHaveLength(3);
@@ -237,7 +237,7 @@ describe('Image Upload Constraints - Property Tests', () => {
       { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property 6: File Path Parsing Is Reversible
    * 
@@ -256,10 +256,10 @@ describe('Image Upload Constraints - Property Tests', () => {
         (userId, listingId, imageType, fileName) => {
           // Arrange
           const filePath = generateFilePath(userId, listingId, imageType, fileName);
-          
+
           // Act
           const parsed = parseFilePath(filePath);
-          
+
           // Assert
           expect(parsed).not.toBeNull();
           expect(parsed!.userId).toBe(userId);
@@ -271,7 +271,7 @@ describe('Image Upload Constraints - Property Tests', () => {
       { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property 7: File Extension Is Preserved
    * 
@@ -290,7 +290,7 @@ describe('Image Upload Constraints - Property Tests', () => {
         (userId, listingId, imageType, fileName) => {
           // Act
           const filePath = generateFilePath(userId, listingId, imageType, fileName);
-          
+
           // Assert
           const extension = filePath.split('.').pop();
           expect(extension).toMatch(/^(jpg|jpeg|png)$/);
@@ -300,7 +300,7 @@ describe('Image Upload Constraints - Property Tests', () => {
       { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property 8: Validation Is Deterministic
    * 
@@ -317,11 +317,11 @@ describe('Image Upload Constraints - Property Tests', () => {
         (mimeType, fileSize, fileName) => {
           // Arrange
           const file = createMockFile(fileName, mimeType, fileSize);
-          
+
           // Act
           const result1 = validateImageFile(file);
           const result2 = validateImageFile(file);
-          
+
           // Assert
           expect(result1.valid).toBe(result2.valid);
           expect(result1.error).toBe(result2.error);
@@ -329,8 +329,8 @@ describe('Image Upload Constraints - Property Tests', () => {
       ),
       { numRuns: 1000 }
     );
-  });
-  
+  }, 60000);
+
   /**
    * Property 9: Boundary Case - Exactly 5MB
    * 
@@ -347,19 +347,19 @@ describe('Image Upload Constraints - Property Tests', () => {
           // Arrange
           const exactSize = 5 * 1024 * 1024; // Exactly 5MB
           const file = createMockFile(fileName, mimeType, exactSize);
-          
+
           // Act
           const result = validateImageFile(file);
-          
+
           // Assert
           expect(result.valid).toBe(true);
           expect(result.error).toBeUndefined();
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
-  });
-  
+  }, 60000);
+
   /**
    * Property 10: Boundary Case - 5MB + 1 Byte
    * 
@@ -376,17 +376,17 @@ describe('Image Upload Constraints - Property Tests', () => {
           // Arrange
           const overSize = 5 * 1024 * 1024 + 1; // 5MB + 1 byte
           const file = createMockFile(fileName, mimeType, overSize);
-          
+
           // Act
           const result = validateImageFile(file);
-          
+
           // Assert
           expect(result.valid).toBe(false);
           expect(result.error).toBeDefined();
           expect(result.error).toContain('5MB');
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
-  });
+  }, 60000);
 });

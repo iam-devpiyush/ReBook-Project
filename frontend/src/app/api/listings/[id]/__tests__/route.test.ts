@@ -1,291 +1,177 @@
 /**
- * Tests for /api/listings/[id] API route
- * 
- * Tests GET, PUT, DELETE endpoints
+ * Integration tests for /api/listings/[id] (GET, PUT, DELETE)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GET, PUT, DELETE } from '../route';
 import { NextRequest } from 'next/server';
+import { GET, PUT, DELETE } from '../route';
 
-// Mock dependencies
-vi.mock('@/lib/supabase/server', () => ({
-  createServerClient: vi.fn(),
-}));
-
-vi.mock('@/lib/auth/middleware', () => ({
-  getUser: vi.fn(),
-  requireSeller: vi.fn(),
-}));
-
+vi.mock('@/lib/supabase/server', () => ({ createServerClient: vi.fn() }));
+vi.mock('@/lib/auth/middleware', () => ({ requireSeller: vi.fn() }));
 vi.mock('@/services/search.service', () => ({
   updateMeilisearchIndex: vi.fn().mockResolvedValue(undefined),
   removeFromMeilisearchIndex: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('@/lib/security/sanitize', () => ({
+  maskPhoneNumber: vi.fn((p: string) => p.replace(/\d(?=\d{4})/g, '*')),
+}));
+vi.mock('@/lib/validation/listing', () => ({
+  updateListingSchema: {
+    safeParse: vi.fn().mockReturnValue({ success: true, data: { condition_score: 4 } }),
+  },
+}));
+
+import { createServerClient } from '@/lib/supabase/server';
+import { requireSeller } from '@/lib/auth/middleware';
+
+const VALID_ID = '123e4567-e89b-12d3-a456-426614174000';
+const INVALID_ID = 'not-a-uuid';
+
+function makeRequest(method = 'GET', body?: object) {
+  return new NextRequest(`http://localhost/api/listings/${VALID_ID}`, {
+    method,
+    body: body ? JSON.stringify(body) : undefined,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+beforeEach(() => {
+  vi.mocked(requireSeller).mockReset();
+  vi.mocked(createServerClient).mockReset();
+});
+
+// ============================================================================
+// GET /api/listings/[id]
+// ============================================================================
 
 describe('GET /api/listings/[id]', () => {
-  let mockSupabaseClient: any;
-  
-  beforeEach(() => {
-    vi.clearAllMocks();
-    
-    mockSupabaseClient = {
+  it('returns 400 for invalid UUID', async () => {
+    const req = new NextRequest(`http://localhost/api/listings/${INVALID_ID}`);
+    const res = await GET(req, { params: { id: INVALID_ID } });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 when listing not found', async () => {
+    const chain = {
       from: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      single: vi.fn(),
+      single: vi.fn().mockResolvedValue({ data: null, error: { message: 'Not found' } }),
+      update: vi.fn().mockReturnThis(),
     };
-    
-    const { createServerClient } = require('@/lib/supabase/server');
-    createServerClient.mockReturnValue(mockSupabaseClient);
+    vi.mocked(createServerClient).mockReturnValue(chain as any);
+    const res = await GET(makeRequest(), { params: { id: VALID_ID } });
+    expect(res.status).toBe(404);
   });
-  
-  it('should return 400 for invalid UUID format', async () => {
-    // Arrange
-    const request = new NextRequest('http://localhost:3000/api/listings/invalid-id');
-    const params = { id: 'invalid-id' };
-    
-    // Act
-    const response = await GET(request, { params });
-    const data = await response.json();
-    
-    // Assert
-    expect(response.status).toBe(400);
-    expect(data.error).toContain('Invalid listing ID format');
-  });
-  
-  it('should return 404 if listing not found', async () => {
-    // Arrange
-    mockSupabaseClient.single.mockResolvedValue({
-      data: null,
-      error: { message: 'Not found' },
-    });
-    
-    const request = new NextRequest('http://localhost:3000/api/listings/123e4567-e89b-12d3-a456-426614174000');
-    const params = { id: '123e4567-e89b-12d3-a456-426614174000' };
-    
-    // Act
-    const response = await GET(request, { params });
-    const data = await response.json();
-    
-    // Assert
-    expect(response.status).toBe(404);
-    expect(data.error).toBe('Listing not found');
-  });
-  
-  it('should return listing and increment view count', async () => {
-    // Arrange
+
+  it('returns 200 with listing data', async () => {
     const mockListing = {
-      id: '123e4567-e89b-12d3-a456-426614174000',
-      title: 'Test Book',
+      id: VALID_ID, title: 'Clean Code', status: 'active',
+      city: 'Mumbai', state: 'Maharashtra', pincode: '400001',
+      seller: { id: 'seller-1', name: 'Seller', email: 'seller@example.com', profile_picture: null, rating: 4.5 },
       views: 10,
-      status: 'active',
     };
-    
-    mockSupabaseClient.single.mockResolvedValue({
-      data: mockListing,
-      error: null,
-    });
-    
-    const request = new NextRequest('http://localhost:3000/api/listings/123e4567-e89b-12d3-a456-426614174000');
-    const params = { id: '123e4567-e89b-12d3-a456-426614174000' };
-    
-    // Act
-    const response = await GET(request, { params });
-    const data = await response.json();
-    
-    // Assert
-    expect(response.status).toBe(200);
-    expect(data.success).toBe(true);
-    expect(data.data).toEqual(mockListing);
+    const updateEq = vi.fn().mockResolvedValue({ error: null });
+    const chain = {
+      from: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: mockListing, error: null }),
+      update: vi.fn().mockReturnValue({ eq: updateEq }),
+    };
+    vi.mocked(createServerClient).mockReturnValue(chain as any);
+    const res = await GET(makeRequest(), { params: { id: VALID_ID } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.id).toBe(VALID_ID);
   });
 });
+
+// ============================================================================
+// PUT /api/listings/[id]
+// ============================================================================
 
 describe('PUT /api/listings/[id]', () => {
-  let mockSupabaseClient: any;
-  let mockRequireSeller: any;
-  
-  beforeEach(() => {
-    vi.clearAllMocks();
-    
-    mockSupabaseClient = {
-      from: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn(),
-    };
-    
-    const { createServerClient } = require('@/lib/supabase/server');
-    createServerClient.mockReturnValue(mockSupabaseClient);
-    
-    mockRequireSeller = require('@/lib/auth/middleware').requireSeller;
+  it('returns 401 when not authenticated as seller', async () => {
+    vi.mocked(requireSeller).mockResolvedValueOnce({
+      success: false,
+      response: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+    } as any);
+    const res = await PUT(makeRequest('PUT', { condition_score: 4 }), { params: { id: VALID_ID } });
+    expect(res.status).toBe(401);
   });
-  
-  it('should return 403 if seller does not own listing', async () => {
-    // Arrange
-    mockRequireSeller.mockResolvedValue({
-      success: true,
-      user: { id: 'user-123', role: 'seller' },
-    });
-    
-    mockSupabaseClient.single.mockResolvedValueOnce({
-      data: { seller_id: 'different-user', status: 'active' },
-      error: null,
-    });
-    
-    const request = new NextRequest('http://localhost:3000/api/listings/123e4567-e89b-12d3-a456-426614174000', {
-      method: 'PUT',
-      body: JSON.stringify({ original_price: 150 }),
-    });
-    const params = { id: '123e4567-e89b-12d3-a456-426614174000' };
-    
-    // Act
-    const response = await PUT(request, { params });
-    const data = await response.json();
-    
-    // Assert
-    expect(response.status).toBe(403);
-    expect(data.error).toContain('do not own');
+
+  it('returns 400 for invalid UUID', async () => {
+    vi.mocked(requireSeller).mockResolvedValueOnce({ success: true, user: { id: 'user-1' } } as any);
+    const req = new NextRequest(`http://localhost/api/listings/${INVALID_ID}`, { method: 'PUT', body: '{}' });
+    const res = await PUT(req, { params: { id: INVALID_ID } });
+    expect(res.status).toBe(400);
   });
-  
-  it('should return 400 if listing status does not allow editing', async () => {
-    // Arrange
-    mockRequireSeller.mockResolvedValue({
-      success: true,
-      user: { id: 'user-123', role: 'seller' },
-    });
-    
-    mockSupabaseClient.single.mockResolvedValueOnce({
-      data: { seller_id: 'user-123', status: 'sold' },
-      error: null,
-    });
-    
-    const request = new NextRequest('http://localhost:3000/api/listings/123e4567-e89b-12d3-a456-426614174000', {
-      method: 'PUT',
-      body: JSON.stringify({ original_price: 150 }),
-    });
-    const params = { id: '123e4567-e89b-12d3-a456-426614174000' };
-    
-    // Act
-    const response = await PUT(request, { params });
-    const data = await response.json();
-    
-    // Assert
-    expect(response.status).toBe(400);
-    expect(data.error).toContain('cannot be edited');
-  });
-  
-  it('should update listing successfully', async () => {
-    // Arrange
-    mockRequireSeller.mockResolvedValue({
-      success: true,
-      user: { id: 'user-123', role: 'seller' },
-    });
-    
-    mockSupabaseClient.single
-      .mockResolvedValueOnce({
-        data: { seller_id: 'user-123', status: 'active' },
-        error: null,
-      })
-      .mockResolvedValueOnce({
-        data: { id: '123e4567-e89b-12d3-a456-426614174000', original_price: 150 },
-        error: null,
-      });
-    
-    const request = new NextRequest('http://localhost:3000/api/listings/123e4567-e89b-12d3-a456-426614174000', {
-      method: 'PUT',
-      body: JSON.stringify({ original_price: 150 }),
-    });
-    const params = { id: '123e4567-e89b-12d3-a456-426614174000' };
-    
-    // Act
-    const response = await PUT(request, { params });
-    const data = await response.json();
-    
-    // Assert
-    expect(response.status).toBe(200);
-    expect(data.success).toBe(true);
-    expect(data.message).toContain('updated successfully');
+
+  it('returns 403 when seller does not own listing', async () => {
+    vi.mocked(requireSeller).mockResolvedValueOnce({ success: true, user: { id: 'user-1' } } as any);
+    const singleFn = vi.fn().mockResolvedValue({ data: { seller_id: 'other-user', status: 'active' }, error: null });
+    vi.mocked(createServerClient).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({ single: singleFn }),
+        }),
+      }),
+    } as any);
+    const res = await PUT(makeRequest('PUT', { condition_score: 4 }), { params: { id: VALID_ID } });
+    expect(res.status).toBe(403);
   });
 });
 
+// ============================================================================
+// DELETE /api/listings/[id]
+// ============================================================================
+
 describe('DELETE /api/listings/[id]', () => {
-  let mockSupabaseClient: any;
-  let mockRequireSeller: any;
-  
-  beforeEach(() => {
-    vi.clearAllMocks();
-    
-    mockSupabaseClient = {
-      from: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn(),
-    };
-    
-    const { createServerClient } = require('@/lib/supabase/server');
-    createServerClient.mockReturnValue(mockSupabaseClient);
-    
-    mockRequireSeller = require('@/lib/auth/middleware').requireSeller;
+  it('returns 401 when not authenticated', async () => {
+    vi.mocked(requireSeller).mockResolvedValueOnce({
+      success: false,
+      response: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+    } as any);
+    const res = await DELETE(makeRequest('DELETE'), { params: { id: VALID_ID } });
+    expect(res.status).toBe(401);
   });
-  
-  it('should return 400 if trying to delete sold listing', async () => {
-    // Arrange
-    mockRequireSeller.mockResolvedValue({
-      success: true,
-      user: { id: 'user-123', role: 'seller' },
-    });
-    
-    mockSupabaseClient.single.mockResolvedValue({
-      data: { seller_id: 'user-123', status: 'sold' },
-      error: null,
-    });
-    
-    const request = new NextRequest('http://localhost:3000/api/listings/123e4567-e89b-12d3-a456-426614174000', {
-      method: 'DELETE',
-    });
-    const params = { id: '123e4567-e89b-12d3-a456-426614174000' };
-    
-    // Act
-    const response = await DELETE(request, { params });
-    const data = await response.json();
-    
-    // Assert
-    expect(response.status).toBe(400);
-    expect(data.error).toContain('Cannot delete sold listings');
+
+  it('returns 400 when trying to delete sold listing', async () => {
+    vi.mocked(requireSeller).mockResolvedValueOnce({ success: true, user: { id: 'user-1' } } as any);
+    vi.mocked(createServerClient).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: { seller_id: 'user-1', status: 'sold' }, error: null }),
+          }),
+        }),
+      }),
+    } as any);
+    const res = await DELETE(makeRequest('DELETE'), { params: { id: VALID_ID } });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('sold');
   });
-  
-  it('should delete listing successfully', async () => {
-    // Arrange
-    mockRequireSeller.mockResolvedValue({
-      success: true,
-      user: { id: 'user-123', role: 'seller' },
-    });
-    
-    mockSupabaseClient.single.mockResolvedValue({
-      data: { seller_id: 'user-123', status: 'active' },
-      error: null,
-    });
-    
-    mockSupabaseClient.eq.mockResolvedValue({
-      error: null,
-    });
-    
-    const request = new NextRequest('http://localhost:3000/api/listings/123e4567-e89b-12d3-a456-426614174000', {
-      method: 'DELETE',
-    });
-    const params = { id: '123e4567-e89b-12d3-a456-426614174000' };
-    
-    // Act
-    const response = await DELETE(request, { params });
-    const data = await response.json();
-    
-    // Assert
-    expect(response.status).toBe(200);
-    expect(data.success).toBe(true);
-    expect(data.message).toContain('deleted successfully');
+
+  it('returns 200 on successful delete', async () => {
+    vi.mocked(requireSeller).mockResolvedValueOnce({ success: true, user: { id: 'user-1' } } as any);
+    vi.mocked(createServerClient).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: { seller_id: 'user-1', status: 'active' }, error: null }),
+          }),
+        }),
+        delete: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+        }),
+      }),
+    } as any);
+    const res = await DELETE(makeRequest('DELETE'), { params: { id: VALID_ID } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
   });
 });

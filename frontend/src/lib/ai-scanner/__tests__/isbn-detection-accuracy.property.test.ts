@@ -36,7 +36,7 @@ const validISBN10Generator = fc.tuple(
   }
   const checkDigit = (11 - (sum % 11)) % 11;
   const checkChar = checkDigit === 10 ? 'X' : checkDigit.toString();
-  
+
   return digits.join('') + checkChar;
 });
 
@@ -54,7 +54,7 @@ const validISBN13Generator = fc.tuple(
     sum += parseInt(allDigits[i]) * (i % 2 === 0 ? 1 : 3);
   }
   const checkDigit = (10 - (sum % 10)) % 10;
-  
+
   return prefix + digits.join('') + checkDigit;
 });
 
@@ -75,7 +75,7 @@ const invalidISBNGenerator = fc.oneof(
       return digits[9] !== correctCheck && !(correctCheck === 10 && digits[9] === 10);
     })
     .map(digits => digits.join('')),
-  
+
   // Invalid ISBN-13 (random 13 digits that don't pass checksum)
   fc.tuple(
     fc.constantFrom('978', '979'),
@@ -110,15 +110,15 @@ describe('Property Test: ISBN Detection Accuracy', () => {
       fc.property(validISBN10Generator, (isbn) => {
         // Valid ISBN-10 should pass validation
         expect(validateISBN(isbn)).toBe(true);
-        
+
         // Should also work with hyphens
         const withHyphens = `${isbn.slice(0, 1)}-${isbn.slice(1, 4)}-${isbn.slice(4, 9)}-${isbn.slice(9)}`;
         expect(validateISBN(withHyphens)).toBe(true);
       }),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property: All valid ISBN-13 strings should be validated correctly
    * 
@@ -129,15 +129,15 @@ describe('Property Test: ISBN Detection Accuracy', () => {
       fc.property(validISBN13Generator, (isbn) => {
         // Valid ISBN-13 should pass validation
         expect(validateISBN(isbn)).toBe(true);
-        
+
         // Should also work with hyphens
         const withHyphens = `${isbn.slice(0, 3)}-${isbn.slice(3, 4)}-${isbn.slice(4, 9)}-${isbn.slice(9, 12)}-${isbn.slice(12)}`;
         expect(validateISBN(withHyphens)).toBe(true);
       }),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property: Invalid ISBNs should be rejected
    * 
@@ -149,10 +149,10 @@ describe('Property Test: ISBN Detection Accuracy', () => {
         // Invalid ISBN should fail validation
         expect(validateISBN(isbn)).toBe(false);
       }),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property: ISBN validation should be case-insensitive for 'X'
    * 
@@ -166,10 +166,10 @@ describe('Property Test: ISBN Detection Accuracy', () => {
           expect(validateISBN(lowercaseVersion)).toBe(true);
         }
       }),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property: ISBN validation should handle various formatting
    * 
@@ -182,20 +182,20 @@ describe('Property Test: ISBN Detection Accuracy', () => {
         (isbn) => {
           // Original should be valid
           expect(validateISBN(isbn)).toBe(true);
-          
+
           // With spaces should be valid
           const withSpaces = isbn.split('').join(' ');
           expect(validateISBN(withSpaces)).toBe(true);
-          
+
           // With mixed formatting should be valid
           const withMixed = isbn.replace(/(\d{3})(\d)/, '$1-$2 ');
           expect(validateISBN(withMixed)).toBe(true);
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property: ISBN validation should reject strings that are too short or too long
    * 
@@ -212,10 +212,10 @@ describe('Property Test: ISBN Detection Accuracy', () => {
           expect(validateISBN(invalidString)).toBe(false);
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
   });
-  
+
   /**
    * Property: ISBN-13 must start with 978 or 979
    * 
@@ -233,7 +233,7 @@ describe('Property Test: ISBN Detection Accuracy', () => {
           expect(validateISBN(isbn)).toBe(false);
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 1000 }
     );
   });
 });

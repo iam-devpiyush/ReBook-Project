@@ -10,8 +10,17 @@
  */
 
 import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import type { User } from '@supabase/supabase-js';
+
+/** Service-role client that bypasses RLS — used only for profile lookups */
+function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 /**
  * User with role information from database
@@ -25,7 +34,7 @@ export interface UserWithRole extends User {
 /**
  * Middleware result containing user or error response
  */
-export type MiddlewareResult = 
+export type MiddlewareResult =
   | { success: true; user: UserWithRole }
   | { success: false; response: NextResponse };
 
@@ -38,10 +47,10 @@ export type MiddlewareResult =
  */
 export async function getUser(_request: NextRequest): Promise<MiddlewareResult> {
   const supabase = createServerClient();
-  
+
   // Get user from session
   const { data: { user }, error } = await supabase.auth.getUser();
-  
+
   if (error || !user) {
     return {
       success: false,
@@ -51,41 +60,58 @@ export async function getUser(_request: NextRequest): Promise<MiddlewareResult> 
       ),
     };
   }
-  
+
   // Fetch user profile from database to get role and status
-  const { data: profile, error: profileError } = await supabase
+  // Use service-role client to bypass RLS
+  const adminClient = createAdminClient();
+  let { data: profile, error: profileError } = await adminClient
     .from('users')
     .select('role, is_active, suspended_until')
     .eq('id', user.id)
     .single();
-  
+
+  // If profile doesn't exist yet (new OAuth user), create it with default role
   if (profileError || !profile) {
-    return {
-      success: false,
-      response: NextResponse.json(
-        { error: 'Failed to fetch user profile' },
-        { status: 500 }
-      ),
-    };
+    const { data: newProfile, error: insertError } = await adminClient
+      .from('users')
+      .upsert({
+        id: user.id,
+        email: user.email,
+        name: user.user_metadata?.full_name || user.user_metadata?.name || user.email,
+        oauth_provider: user.app_metadata?.provider || 'google',
+        oauth_provider_id: user.user_metadata?.sub || user.id,
+        role: 'buyer',
+        is_active: true,
+        suspended_until: null,
+      }, { onConflict: 'id' })
+      .select('role, is_active, suspended_until')
+      .single();
+
+    if (insertError || !newProfile) {
+      // Still can't get profile — allow access with safe defaults
+      profile = { role: 'buyer', is_active: true, suspended_until: null } as typeof profile;
+    } else {
+      profile = newProfile;
+    }
   }
-  
+
   // Type assertion for profile data
   const userProfile = profile as {
     role: 'buyer' | 'seller' | 'admin';
     is_active: boolean;
     suspended_until: string | null;
   };
-  
+
   // Check if user is suspended
   if (userProfile.suspended_until) {
     const suspendedUntil = new Date(userProfile.suspended_until);
     const now = new Date();
-    
+
     if (suspendedUntil > now) {
       return {
         success: false,
         response: NextResponse.json(
-          { 
+          {
             error: 'Account suspended',
             suspended_until: userProfile.suspended_until,
           },
@@ -94,7 +120,7 @@ export async function getUser(_request: NextRequest): Promise<MiddlewareResult> 
       };
     }
   }
-  
+
   // Check if user is active
   if (!userProfile.is_active) {
     return {
@@ -105,7 +131,7 @@ export async function getUser(_request: NextRequest): Promise<MiddlewareResult> 
       ),
     };
   }
-  
+
   // Attach role to user object
   const userWithRole: UserWithRole = {
     ...user,
@@ -113,7 +139,7 @@ export async function getUser(_request: NextRequest): Promise<MiddlewareResult> 
     is_active: userProfile.is_active,
     suspended_until: userProfile.suspended_until,
   };
-  
+
   return {
     success: true,
     user: userWithRole,
@@ -140,13 +166,13 @@ export async function requireAuth(request: NextRequest): Promise<MiddlewareResul
  */
 export async function requireSeller(request: NextRequest): Promise<MiddlewareResult> {
   const result = await getUser(request);
-  
+
   if (!result.success) {
     return result;
   }
-  
+
   const { user } = result;
-  
+
   // Check if user has seller or admin role (admins can access seller routes)
   if (user.role !== 'seller' && user.role !== 'admin') {
     return {
@@ -157,7 +183,7 @@ export async function requireSeller(request: NextRequest): Promise<MiddlewareRes
       ),
     };
   }
-  
+
   return {
     success: true,
     user,
@@ -173,13 +199,13 @@ export async function requireSeller(request: NextRequest): Promise<MiddlewareRes
  */
 export async function requireAdmin(request: NextRequest): Promise<MiddlewareResult> {
   const result = await getUser(request);
-  
+
   if (!result.success) {
     return result;
   }
-  
+
   const { user } = result;
-  
+
   // Check if user has admin role
   if (user.role !== 'admin') {
     return {
@@ -190,7 +216,7 @@ export async function requireAdmin(request: NextRequest): Promise<MiddlewareResu
       ),
     };
   }
-  
+
   return {
     success: true,
     user,

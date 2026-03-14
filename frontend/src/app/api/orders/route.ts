@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
 import { createServerClient } from '@/lib/supabase/server';
 import { processOrder } from '@/services/order.service';
+import { applyRateLimit, ORDER_RATE_LIMIT } from '@/lib/rate-limit';
 
 // ---------------------------------------------------------------------------
 // POST /api/orders — create order
@@ -22,6 +23,11 @@ export async function POST(request: NextRequest) {
     if (!authResult.success) return authResult.response;
 
     const { user } = authResult;
+
+    // Rate limit: 20 orders per hour per user (Requirement 18.3)
+    const rateLimitResponse = applyRateLimit(request, `order-create:${user.id}`, ORDER_RATE_LIMIT);
+    if (rateLimitResponse) return rateLimitResponse;
+
     const body = await request.json();
     const { listing_id, delivery_address } = body;
 
@@ -72,16 +78,21 @@ export async function GET(request: NextRequest) {
     const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') ?? '20', 10)));
     const offset = (page - 1) * pageSize;
 
-    const supabase = createServerClient();
-    const db = supabase as any;
+    // Use service role to bypass RLS — query is already scoped to buyer_id/seller_id
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    // Fetch as buyer OR seller
-    let query = db
+    let query = supabase
       .from('orders')
       .select(
-        `id, listing_id, buyer_id, seller_id, total_amount, currency, status,
-         delivery_address, tracking_id, created_at, updated_at,
-         listings(id, books(title, author), images)`,
+        `id, listing_id, buyer_id, seller_id, book_id,
+         price, delivery_cost, platform_commission, payment_fees, seller_payout,
+         status, payment_status, tracking_id, delivery_address,
+         created_at, updated_at, paid_at, shipped_at, delivered_at,
+         listing:listings(id, images, book:books(id, title, author, isbn))`,
         { count: 'exact' }
       )
       .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
@@ -93,8 +104,8 @@ export async function GET(request: NextRequest) {
     const { data: orders, error, count } = await query;
 
     if (error) {
-      console.error('Error fetching orders:', error);
-      return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 });
+      console.error('Error fetching orders:', JSON.stringify(error));
+      return NextResponse.json({ error: `Failed to fetch orders: ${error.message}` }, { status: 500 });
     }
 
     return NextResponse.json({

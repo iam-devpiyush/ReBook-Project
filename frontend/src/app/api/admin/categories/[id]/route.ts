@@ -9,8 +9,15 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 import { wouldCreateCycle } from '@/app/api/categories/route';
+
+function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 const VALID_TYPES = ['school', 'competitive_exam', 'college', 'general'] as const;
 
@@ -32,7 +39,7 @@ export async function PUT(
     const body = await request.json();
     const { name, type, parent_id, metadata } = body;
 
-    const supabase = createServerClient();
+    const supabase = createAdminClient();
 
     // Verify category exists
     const { data: existing, error: fetchError } = await supabase
@@ -133,7 +140,7 @@ export async function DELETE(
     if (!authResult.success) return authResult.response;
 
     const { id } = params;
-    const supabase = createServerClient();
+    const supabase = createAdminClient();
 
     // Verify category exists
     const { data: existing, error: fetchError } = await supabase

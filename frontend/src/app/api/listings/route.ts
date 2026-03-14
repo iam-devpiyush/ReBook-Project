@@ -1,201 +1,186 @@
 /**
  * API Route: /api/listings
- * 
  * POST: Create a new listing with admin approval required
- * 
- * Requirements: 2.1-2.10, 3.1, 3.2
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
-import { requireSeller } from '@/lib/auth/middleware';
+import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/auth/middleware';
 import { createListingSchema } from '@/lib/validation/listing';
 import type { CreateListingRequest } from '@/types/listing';
+import { applyRateLimit, LISTING_CREATION_RATE_LIMIT } from '@/lib/rate-limit';
 
-/**
- * POST /api/listings
- * 
- * Create a new book listing
- * - Verifies seller is authenticated
- * - Validates listing data with Zod schema
- * - Creates or finds book record
- * - Creates listing with status "pending_approval"
- * - Returns created listing
- */
+function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
-    // Verify seller is authenticated
-    const authResult = await requireSeller(request);
-    
-    if (!authResult.success) {
-      return authResult.response;
-    }
-    
+    const authResult = await requireAuth(request);
+    if (!authResult.success) return authResult.response;
     const { user } = authResult;
-    
-    // Parse and validate request body
+
+    const rateLimitResponse = applyRateLimit(request, `listing-create:${user.id}`, LISTING_CREATION_RATE_LIMIT);
+    if (rateLimitResponse) return rateLimitResponse;
+
     const body: CreateListingRequest = await request.json();
-    
     const validationResult = createListingSchema.safeParse(body);
-    
+
     if (!validationResult.success) {
       return NextResponse.json(
-        { 
-          error: 'Validation failed', 
-          details: validationResult.error.errors 
-        },
+        { error: 'Validation failed', details: validationResult.error.errors },
         { status: 400 }
       );
     }
-    
+
     const validatedData = validationResult.data;
-    
-    // Create Supabase client
-    const supabase = createServerClient();
-    
-    // Check if seller has reached listing limit
-    const { data: sellerProfile, error: profileError } = await supabase
-      .from('users')
-      .select('listing_limit')
-      .eq('id', user.id)
-      .single();
-    
-    if (profileError) {
-      console.error('Error fetching seller profile:', profileError);
-      return NextResponse.json(
-        { error: 'Failed to verify seller status' },
-        { status: 500 }
-      );
+    const adminSupabase = createAdminClient();
+
+    // 1. Upload data: URL images to Storage
+    const finalImages: string[] = [];
+    for (let i = 0; i < validatedData.images.length; i++) {
+      const img = validatedData.images[i];
+      if (img.startsWith('data:')) {
+        try {
+          await adminSupabase.storage.createBucket('book-images', { public: true }).catch(() => {});
+          const [meta, base64] = img.split(',');
+          const mime = (meta.match(/data:([^;]+);/) || [])[1] || 'image/jpeg';
+          const ext = mime.split('/')[1] || 'jpg';
+          const filePath = `listings/${user.id}/${Date.now()}_${i}.${ext}`;
+          const { error: upErr } = await adminSupabase.storage
+            .from('book-images')
+            .upload(filePath, Buffer.from(base64, 'base64'), { contentType: mime, upsert: true });
+          if (!upErr) {
+            const { data: pub } = adminSupabase.storage.from('book-images').getPublicUrl(filePath);
+            finalImages.push(pub.publicUrl);
+          } else {
+            finalImages.push('https://placehold.co/400x600?text=Book');
+          }
+        } catch {
+          finalImages.push('https://placehold.co/400x600?text=Book');
+        }
+      } else {
+        finalImages.push(img);
+      }
     }
-    
-    // Check listing limit (-1 means unlimited)
-    if (sellerProfile.listing_limit !== null && sellerProfile.listing_limit !== -1) {
-      const { count, error: countError } = await supabase
-        .from('listings')
-        .select('*', { count: 'exact', head: true })
-        .eq('seller_id', user.id)
-        .in('status', ['pending_approval', 'active']);
-      
-      if (countError) {
-        console.error('Error counting listings:', countError);
+    if (finalImages.length === 0) finalImages.push('https://placehold.co/400x600?text=Book');
+
+    // 2. Resolve category
+    let categoryId: string | null = null;
+    const rawCategory = validatedData.category_id;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawCategory);
+
+    if (isUuid) {
+      categoryId = rawCategory;
+    } else {
+      const { data: existingCat } = await adminSupabase
+        .from('categories')
+        .select('id')
+        .ilike('name', rawCategory)
+        .maybeSingle();
+
+      if (existingCat) {
+        categoryId = existingCat.id;
+      } else {
+        const { data: newCat } = await adminSupabase
+          .from('categories')
+          .insert({ name: rawCategory, type: 'general' })
+          .select('id')
+          .single();
+        if (newCat) categoryId = newCat.id;
+      }
+    }
+
+    // 3. Find or create book
+    let bookId = validatedData.book_id ?? null;
+
+    if (!bookId && validatedData.isbn) {
+      const { data: existing } = await adminSupabase
+        .from('books')
+        .select('id')
+        .eq('isbn', validatedData.isbn)
+        .maybeSingle();
+      if (existing) bookId = existing.id;
+    }
+
+    if (!bookId) {
+      const bookTitle = (validatedData.title && validatedData.title.trim()) ? validatedData.title.trim() : 'Unknown Title';
+      const bookAuthor = (validatedData.author && validatedData.author.trim()) ? validatedData.author.trim() : 'Unknown Author';
+      const coverImage = finalImages.find(u => u.startsWith('http')) ?? null;
+
+      const { data: newBook, error: bookError } = await adminSupabase
+        .from('books')
+        .insert({
+          isbn: validatedData.isbn || null,
+          title: bookTitle,
+          author: bookAuthor,
+          publisher: validatedData.publisher || null,
+          edition: validatedData.edition || null,
+          publication_year: validatedData.publication_year || null,
+          category_id: categoryId,
+          subject: validatedData.subject || null,
+          description: validatedData.description || null,
+          cover_image: coverImage,
+        })
+        .select('id')
+        .single();
+
+      if (bookError || !newBook) {
+        console.error('Book insert error:', JSON.stringify(bookError));
         return NextResponse.json(
-          { error: 'Failed to verify listing limit' },
+          { error: `Failed to create book record: ${bookError?.message ?? 'unknown'} [code: ${bookError?.code ?? ''}, detail: ${bookError?.details ?? ''}]` },
           { status: 500 }
         );
       }
-      
-      if (count !== null && count >= sellerProfile.listing_limit) {
-        return NextResponse.json(
-          { 
-            error: 'Listing limit reached', 
-            limit: sellerProfile.listing_limit,
-            current: count 
-          },
-          { status: 403 }
-        );
-      }
+      bookId = newBook.id;
     }
-    
-    // Find or create book record
-    let bookId = validatedData.book_id;
-    
-    if (!bookId) {
-      // Check if book exists by ISBN
-      if (validatedData.isbn) {
-        const { data: existingBook } = await supabase
-          .from('books')
-          .select('id')
-          .eq('isbn', validatedData.isbn)
-          .single();
-        
-        if (existingBook) {
-          bookId = existingBook.id;
-        }
-      }
-      
-      // Create new book if not found
-      if (!bookId) {
-        const { data: newBook, error: bookError } = await supabase
-          .from('books')
-          .insert({
-            isbn: validatedData.isbn || null,
-            title: validatedData.title,
-            author: validatedData.author,
-            publisher: validatedData.publisher || null,
-            edition: validatedData.edition || null,
-            publication_year: validatedData.publication_year || null,
-            category_id: validatedData.category_id,
-            subject: validatedData.subject || null,
-            description: validatedData.description || null,
-            cover_image: validatedData.images[0], // Use first image as cover
-          })
-          .select('id')
-          .single();
-        
-        if (bookError || !newBook) {
-          console.error('Error creating book:', bookError);
-          return NextResponse.json(
-            { error: 'Failed to create book record' },
-            { status: 500 }
-          );
-        }
-        
-        bookId = newBook.id;
-      }
-    }
-    
-    // Create listing with status "pending_approval"
-    const { data: listing, error: listingError } = await supabase
+
+    // 4. Create listing
+    const { data: listing, error: listingError } = await adminSupabase
       .from('listings')
       .insert({
         book_id: bookId,
         seller_id: user.id,
         original_price: validatedData.original_price,
         condition_score: validatedData.condition_score,
-        condition_details: validatedData.condition_details || null,
+        condition_details: validatedData.condition_details ?? null,
         final_price: validatedData.final_price,
         delivery_cost: validatedData.delivery_cost,
         platform_commission: validatedData.platform_commission,
         payment_fees: validatedData.payment_fees,
         seller_payout: validatedData.seller_payout,
         status: 'pending_approval',
-        images: validatedData.images,
-        location: validatedData.location,
+        images: finalImages,
+        city: validatedData.location.city,
+        state: validatedData.location.state,
+        pincode: validatedData.location.pincode,
+        latitude: validatedData.location.latitude ?? null,
+        longitude: validatedData.location.longitude ?? null,
       })
-      .select(`
-        *,
-        book:books(*),
-        seller:users(id, name, email, profile_picture, rating)
-      `)
+      .select('id, status, created_at, book_id, seller_id, final_price, seller_payout')
       .single();
-    
+
     if (listingError || !listing) {
-      console.error('Error creating listing:', listingError);
+      console.error('Listing insert error:', JSON.stringify(listingError));
       return NextResponse.json(
-        { error: 'Failed to create listing' },
+        { error: `Failed to create listing: ${listingError?.message ?? 'unknown'} [code: ${listingError?.code ?? ''}, detail: ${listingError?.details ?? ''}]` },
         { status: 500 }
       );
     }
-    
-    return NextResponse.json({
-      success: true,
-      data: listing,
-      message: 'Listing created successfully and submitted for admin approval',
-    }, { status: 201 });
-    
-  } catch (error) {
-    console.error('Error in POST /api/listings:', error);
-    
-    if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        { error: 'Invalid JSON in request body' },
-        { status: 400 }
-      );
-    }
-    
+
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { success: true, data: listing, message: 'Listing submitted for admin approval' },
+      { status: 201 }
     );
+
+  } catch (error) {
+    console.error('Unhandled error in POST /api/listings:', error);
+    if (error instanceof SyntaxError) {
+      return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+    }
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

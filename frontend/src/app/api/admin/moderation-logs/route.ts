@@ -8,7 +8,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
+
+function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 /**
  * GET /api/admin/moderation-logs
@@ -104,7 +111,7 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * pageSize;
 
     // Create Supabase client
-    const supabase = createServerClient();
+    const supabase = createAdminClient();
 
     // Build query with admin user info joined
     let query = supabase

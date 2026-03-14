@@ -52,7 +52,7 @@ export default function QRCodeGenerator({
   return (
     <div className="flex flex-col items-center">
       <div className="mb-4 text-center">
-        <h3 className="text-lg font-semibold mb-2">Scan with Mobile Camera</h3>
+        <h3 className="text-lg font-semibold mb-2 text-gray-900">Scan with Mobile Camera</h3>
         <p className="text-gray-600 text-sm">
           Scan this QR code with your mobile device to use your phone's camera
         </p>
@@ -78,7 +78,7 @@ export default function QRCodeGenerator({
             type="text"
             value={mobileUrl}
             readOnly
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50 text-gray-900"
           />
           <button
             onClick={handleCopyUrl}

@@ -30,7 +30,8 @@ export default function PricingBreakdownDisplay({
   showSellerPayout = false,
   variant = 'default',
 }: PricingBreakdownDisplayProps) {
-  const formatPrice = (amount: number): string => {
+  const formatPrice = (amount: number | undefined): string => {
+    if (amount === undefined || amount === null || isNaN(amount)) return '₹0.00';
     return `₹${amount.toFixed(2)}`;
   };
 

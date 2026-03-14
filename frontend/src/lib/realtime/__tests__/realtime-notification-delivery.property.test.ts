@@ -96,19 +96,22 @@ const orderStatusArb = fc.constantFrom<OrderStatus>(
   'pending_payment', 'paid', 'shipped', 'delivered', 'cancelled'
 );
 
+const safeISODateArb = fc.integer({ min: 946684800000, max: 4102444800000 }) // 2000-01-01 to 2099-12-31 in ms
+  .map(ms => new Date(ms).toISOString());
+
 const listingPayloadArb = fc.record<ListingApprovalPayload>({
   listingId: uuidArb,
   status: listingStatusArb,
   reason: fc.option(fc.string({ minLength: 1, maxLength: 200 }).filter(s => s.trim().length > 0), { nil: undefined }),
   notes: fc.option(fc.string({ minLength: 1, maxLength: 200 }), { nil: undefined }),
-  approvedAt: fc.option(fc.date({ min: new Date(0), max: new Date(2100, 0, 1) }).map(d => d.toISOString()), { nil: undefined }),
+  approvedAt: fc.option(safeISODateArb, { nil: undefined }),
 });
 
 const orderPayloadArb = fc.record<OrderUpdatePayload>({
   orderId: uuidArb,
   status: orderStatusArb,
   trackingId: fc.option(fc.string({ minLength: 5, maxLength: 30 }), { nil: undefined }),
-  updatedAt: fc.date({ min: new Date(0), max: new Date(2100, 0, 1) }).map(d => d.toISOString()),
+  updatedAt: safeISODateArb,
 });
 
 const scanPayloadArb = fc.record<ScanProgressPayload>({
@@ -126,14 +129,15 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
   describe('Listing approval notifications', () => {
     it('approved listings produce valid payloads', () => {
       fc.assert(
-        fc.property(uuidArb, fc.date({ min: new Date(0), max: new Date(2100, 0, 1) }).map(d => d.toISOString()), (listingId, approvedAt) => {
+        fc.property(uuidArb, safeISODateArb, (listingId, approvedAt) => {
           const payload: ListingApprovalPayload = {
             listingId,
             status: 'active',
             approvedAt,
           };
           expect(validateListingPayload(payload)).toBe(true);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -143,7 +147,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
         fc.property(uuidArb, fc.string({ minLength: 1, maxLength: 200 }).filter(s => s.trim().length > 0), (listingId, reason) => {
           const payload: ListingApprovalPayload = { listingId, status: 'rejected', reason };
           expect(validateListingPayload(payload)).toBe(true);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -152,7 +157,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
         fc.property(uuidArb, (listingId) => {
           const payload: ListingApprovalPayload = { listingId, status: 'rejected' };
           expect(validateListingPayload(payload)).toBe(false);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -161,7 +167,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
         fc.property(uuidArb, (listingId) => {
           const payload: ListingApprovalPayload = { listingId, status: 'rescan_required' };
           expect(validateListingPayload(payload)).toBe(true);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -170,7 +177,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
         fc.property(uuidArb, (listingId) => {
           expect(listingChannel(listingId)).toBe(`listing:${listingId}`);
           expect(listingChannel(listingId)).toBe(listingChannel(listingId));
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -179,7 +187,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
         fc.property(uuidArb, uuidArb, (id1, id2) => {
           fc.pre(id1 !== id2);
           expect(listingChannel(id1)).not.toBe(listingChannel(id2));
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
   });
@@ -189,7 +198,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
       fc.assert(
         fc.property(orderPayloadArb, (payload) => {
           expect(validateOrderPayload(payload)).toBe(true);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -197,7 +207,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
       fc.assert(
         fc.property(uuidArb, (orderId) => {
           expect(orderChannel(orderId)).toBe(`order:${orderId}`);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -206,7 +217,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
         fc.property(uuidArb, uuidArb, (id1, id2) => {
           fc.pre(id1 !== id2);
           expect(orderChannel(id1)).not.toBe(orderChannel(id2));
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -215,7 +227,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
         fc.property(uuidArb, orderStatusArb, (orderId, status) => {
           const payload = { orderId, status, updatedAt: '' } as OrderUpdatePayload;
           expect(validateOrderPayload(payload)).toBe(false);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
   });
@@ -225,7 +238,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
       fc.assert(
         fc.property(scanPayloadArb, (payload) => {
           expect(validateScanPayload(payload)).toBe(true);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -234,7 +248,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
         fc.property(scanPayloadArb, (payload) => {
           expect(payload.progress).toBeGreaterThanOrEqual(0);
           expect(payload.progress).toBeLessThanOrEqual(100);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
 
@@ -248,7 +263,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
             const payload: ScanProgressPayload = { scanId, progress, message };
             expect(validateScanPayload(payload)).toBe(false);
           }
-        )
+        ),
+        { numRuns: 1000 }
       );
     });
 
@@ -256,7 +272,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
       fc.assert(
         fc.property(uuidArb, (scanId) => {
           expect(scanChannel(scanId)).toBe(`scan:${scanId}`);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
   });
@@ -268,7 +285,8 @@ describe('Real-time Notification Delivery (Property 45.4)', () => {
           const channels = [listingChannel(id), orderChannel(id), scanChannel(id)];
           const unique = new Set(channels);
           expect(unique.size).toBe(3);
-        })
+        }),
+        { numRuns: 1000 }
       );
     });
   });

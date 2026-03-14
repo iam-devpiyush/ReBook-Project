@@ -91,23 +91,23 @@ describe('Property: User Suspension Enforcement', () => {
             if (isSuspended) {
               // Property 1: Suspended users cannot create listings
               expect(result.success).toBe(false);
-              
+
               if (!result.success) {
                 const responseData = await result.response.json();
-                
+
                 // Property 2: Error message indicates suspension
                 expect(responseData.error).toBe('Account suspended');
-                
+
                 // Property 3: Response includes suspended_until timestamp
                 expect(responseData.suspended_until).toBe(suspendedUntil.toISOString());
-                
+
                 // Property 4: HTTP status is 403 Forbidden
                 expect(result.response.status).toBe(403);
               }
             } else {
               // Property 5: Non-suspended users CAN create listings
               expect(result.success).toBe(true);
-              
+
               if (result.success) {
                 expect(result.user).toBeDefined();
                 expect(result.user.id).toBe(userId);
@@ -121,23 +121,23 @@ describe('Property: User Suspension Enforcement', () => {
           if (isSuspended) {
             // Property 6: Suspended users cannot place orders
             expect(authResult.success).toBe(false);
-            
+
             if (!authResult.success) {
               const responseData = await authResult.response.json();
-              
+
               // Property 7: Error message indicates suspension
               expect(responseData.error).toBe('Account suspended');
-              
+
               // Property 8: Response includes suspended_until timestamp
               expect(responseData.suspended_until).toBe(suspendedUntil.toISOString());
-              
+
               // Property 9: HTTP status is 403 Forbidden
               expect(authResult.response.status).toBe(403);
             }
           } else {
             // Property 10: Non-suspended users CAN place orders
             expect(authResult.success).toBe(true);
-            
+
             if (authResult.success) {
               expect(authResult.user).toBeDefined();
               expect(authResult.user.id).toBe(userId);
@@ -146,7 +146,7 @@ describe('Property: User Suspension Enforcement', () => {
         }
       ),
       {
-        numRuns: 100,
+        numRuns: 1000,
         timeout: 30000,
       }
     );
@@ -201,10 +201,10 @@ describe('Property: User Suspension Enforcement', () => {
           // Test listing creation
           if (role === 'seller' || role === 'admin') {
             const result = await requireSeller(request);
-            
+
             // Property: Users with null suspended_until can create listings
             expect(result.success).toBe(true);
-            
+
             if (result.success) {
               expect(result.user.id).toBe(userId);
               expect(result.user.suspended_until).toBeNull();
@@ -213,10 +213,10 @@ describe('Property: User Suspension Enforcement', () => {
 
           // Test order placement
           const authResult = await requireAuth(request);
-          
+
           // Property: Users with null suspended_until can place orders
           expect(authResult.success).toBe(true);
-          
+
           if (authResult.success) {
             expect(authResult.user.id).toBe(userId);
             expect(authResult.user.suspended_until).toBeNull();
@@ -224,7 +224,7 @@ describe('Property: User Suspension Enforcement', () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 1000,
         timeout: 30000,
       }
     );
@@ -286,10 +286,10 @@ describe('Property: User Suspension Enforcement', () => {
           // Test listing creation
           if (role === 'seller' || role === 'admin') {
             const result = await requireSeller(request);
-            
+
             // Property: Users with expired suspensions can create listings
             expect(result.success).toBe(true);
-            
+
             if (result.success) {
               expect(result.user.id).toBe(userId);
             }
@@ -297,17 +297,17 @@ describe('Property: User Suspension Enforcement', () => {
 
           // Test order placement
           const authResult = await requireAuth(request);
-          
+
           // Property: Users with expired suspensions can place orders
           expect(authResult.success).toBe(true);
-          
+
           if (authResult.success) {
             expect(authResult.user.id).toBe(userId);
           }
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 1000,
         timeout: 30000,
       }
     );
@@ -369,10 +369,10 @@ describe('Property: User Suspension Enforcement', () => {
           // Test listing creation
           if (role === 'seller' || role === 'admin') {
             const result = await requireSeller(request);
-            
+
             // Property: Users with future suspensions cannot create listings
             expect(result.success).toBe(false);
-            
+
             if (!result.success) {
               const responseData = await result.response.json();
               expect(responseData.error).toBe('Account suspended');
@@ -383,10 +383,10 @@ describe('Property: User Suspension Enforcement', () => {
 
           // Test order placement
           const authResult = await requireAuth(request);
-          
+
           // Property: Users with future suspensions cannot place orders
           expect(authResult.success).toBe(false);
-          
+
           if (!authResult.success) {
             const responseData = await authResult.response.json();
             expect(responseData.error).toBe('Account suspended');
@@ -396,7 +396,7 @@ describe('Property: User Suspension Enforcement', () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 1000,
         timeout: 30000,
       }
     );
@@ -454,10 +454,10 @@ describe('Property: User Suspension Enforcement', () => {
 
           // Test both middleware functions
           const authResult = await requireAuth(request);
-          
+
           // Reset mocks for second call
           vi.mocked(supabaseServer.createServerClient).mockReturnValue(mockSupabase as any);
-          
+
           const sellerResult = await requireSeller(request);
 
           // Property: Both middleware functions should return the same suspension status
@@ -488,7 +488,7 @@ describe('Property: User Suspension Enforcement', () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 1000,
         timeout: 30000,
       }
     );

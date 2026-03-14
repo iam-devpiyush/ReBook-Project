@@ -32,19 +32,19 @@ export interface ISBNDetectionResult {
  */
 function validateISBN10(isbn: string): boolean {
   if (isbn.length !== 10) return false;
-  
+
   let sum = 0;
   for (let i = 0; i < 9; i++) {
     const digit = parseInt(isbn[i]);
     if (isNaN(digit)) return false;
     sum += digit * (10 - i);
   }
-  
+
   // Last digit can be X (representing 10)
   const lastChar = isbn[9];
   const lastDigit = lastChar === 'X' ? 10 : parseInt(lastChar);
   if (isNaN(lastDigit)) return false;
-  
+
   sum += lastDigit;
   return sum % 11 === 0;
 }
@@ -57,22 +57,22 @@ function validateISBN10(isbn: string): boolean {
  */
 function validateISBN13(isbn: string): boolean {
   if (isbn.length !== 13) return false;
-  
+
   // ISBN-13 must start with 978 or 979
   if (!isbn.startsWith('978') && !isbn.startsWith('979')) {
     return false;
   }
-  
+
   let sum = 0;
   for (let i = 0; i < 12; i++) {
     const digit = parseInt(isbn[i]);
     if (isNaN(digit)) return false;
     sum += digit * (i % 2 === 0 ? 1 : 3);
   }
-  
+
   const checkDigit = parseInt(isbn[12]);
   if (isNaN(checkDigit)) return false;
-  
+
   const calculatedCheck = (10 - (sum % 10)) % 10;
   return checkDigit === calculatedCheck;
 }
@@ -84,13 +84,10 @@ function validateISBN13(isbn: string): boolean {
  * @returns Valid ISBN or null
  */
 function extractISBN(text: string): string | null {
-  // Remove all non-alphanumeric characters except hyphens
-  const cleaned = text.replace(/[^0-9X-]/gi, '');
-  
-  // Try to find ISBN-13 pattern (978 or 979 prefix)
-  const isbn13Pattern = /(?:978|979)[\d-]{10,17}/gi;
-  const isbn13Matches = cleaned.match(isbn13Pattern);
-  
+  // Try to find ISBN-13 pattern (978 or 979 prefix) in raw OCR text first
+  const isbn13Pattern = /(?:978|979)[\d-]{9,14}/gi;
+  const isbn13Matches = text.match(isbn13Pattern);
+
   if (isbn13Matches) {
     for (const match of isbn13Matches) {
       const digits = match.replace(/-/g, '');
@@ -99,11 +96,11 @@ function extractISBN(text: string): string | null {
       }
     }
   }
-  
-  // Try to find ISBN-10 pattern
-  const isbn10Pattern = /\d{9}[\dX]/gi;
-  const isbn10Matches = cleaned.match(isbn10Pattern);
-  
+
+  // Try to find ISBN-10 pattern in raw text
+  const isbn10Pattern = /\b\d{9}[\dX]\b/gi;
+  const isbn10Matches = text.match(isbn10Pattern);
+
   if (isbn10Matches) {
     for (const match of isbn10Matches) {
       const digits = match.replace(/-/g, '');
@@ -112,7 +109,24 @@ function extractISBN(text: string): string | null {
       }
     }
   }
-  
+
+  // Fallback: strip all non-digit/X chars and scan for valid ISBNs
+  const cleaned = text.replace(/[^0-9X]/gi, '').toUpperCase();
+
+  for (let i = 0; i <= cleaned.length - 13; i++) {
+    const candidate = cleaned.substring(i, i + 13);
+    if ((candidate.startsWith('978') || candidate.startsWith('979')) && validateISBN13(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (let i = 0; i <= cleaned.length - 10; i++) {
+    const candidate = cleaned.substring(i, i + 10);
+    if (validateISBN10(candidate)) {
+      return candidate;
+    }
+  }
+
   return null;
 }
 
@@ -145,16 +159,16 @@ export async function detectISBNFromImage(
         }
       }
     });
-    
+
     // Extract ISBN from recognized text
     const isbn = extractISBN(result.data.text);
-    
+
     return {
       isbn,
       confidence: result.data.confidence / 100, // Convert to 0-1 range
       source
     };
-    
+
   } catch (error) {
     console.error(`ISBN detection failed for ${source}:`, error);
     return {
@@ -184,20 +198,30 @@ export async function detectISBNBarcode(
 ): Promise<string | null> {
   // Try front cover first
   const frontResult = await detectISBNFromImage(frontCoverUrl, 'front_cover');
-  
-  if (frontResult.isbn && frontResult.confidence > 0.6) {
+
+  if (frontResult.isbn && frontResult.confidence > 0.3) {
     console.log(`ISBN detected from front cover: ${frontResult.isbn}`);
     return frontResult.isbn;
   }
-  
+
   // Try back cover if front cover failed
   const backResult = await detectISBNFromImage(backCoverUrl, 'back_cover');
-  
-  if (backResult.isbn && backResult.confidence > 0.6) {
+
+  if (backResult.isbn && backResult.confidence > 0.3) {
     console.log(`ISBN detected from back cover: ${backResult.isbn}`);
     return backResult.isbn;
   }
-  
+
+  // If ISBN was found but confidence was low, still return it (better than nothing)
+  if (frontResult.isbn) {
+    console.log(`ISBN detected from front cover (low confidence): ${frontResult.isbn}`);
+    return frontResult.isbn;
+  }
+  if (backResult.isbn) {
+    console.log(`ISBN detected from back cover (low confidence): ${backResult.isbn}`);
+    return backResult.isbn;
+  }
+
   // No ISBN detected
   console.log('ISBN detection failed on both covers');
   return null;
@@ -211,12 +235,12 @@ export async function detectISBNBarcode(
  */
 export function validateISBN(isbn: string): boolean {
   const cleaned = isbn.replace(/[^0-9X]/gi, '').toUpperCase();
-  
+
   if (cleaned.length === 10) {
     return validateISBN10(cleaned);
   } else if (cleaned.length === 13) {
     return validateISBN13(cleaned);
   }
-  
+
   return false;
 }

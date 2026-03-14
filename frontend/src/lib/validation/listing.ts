@@ -31,22 +31,29 @@ export const createListingSchema = z.object({
   // Book information
   book_id: z.string().uuid().optional(),
   isbn: z.string().optional(),
-  title: z.string().min(1, 'Title is required').max(500),
-  author: z.string().min(1, 'Author is required').max(200),
+  title: z.string().max(500).default('Unknown Title'),
+  author: z.string().max(200).default('Unknown Author'),
   publisher: z.string().max(200).optional(),
   edition: z.string().max(100).optional(),
-  publication_year: z.number().int().min(1900).max(new Date().getFullYear() + 1).optional(),
-  category_id: z.string().uuid('Invalid category ID'),
+  publication_year: z.preprocess(
+    (v) => (!v || (typeof v === 'number' && (isNaN(v) || v === 0)) ? undefined : Number(v)),
+    z.number().int().optional()
+  ),
+  category_id: z.string().min(1, 'Category is required'),
   subject: z.string().max(200).optional(),
   description: z.string().max(2000).optional(),
-  
+
   // Listing details
-  original_price: z.number().positive('Original price must be positive'),
+  original_price: z.preprocess(
+    (v) => (!v || (typeof v === 'number' && (isNaN(v) || v === 0)) ? undefined : Number(v)),
+    z.number().positive('Original price must be positive')
+  ),
   condition_score: z.number().int().min(1).max(5, 'Condition score must be between 1 and 5'),
   condition_details: conditionDetailsSchema.optional(),
-  images: z.array(z.string().url()).min(1, 'At least one image is required').max(10, 'Maximum 10 images allowed'),
+  // Accept both https URLs and data URLs (base64 captured images)
+  images: z.array(z.string().min(1)).min(1, 'At least one image is required').max(10, 'Maximum 10 images allowed'),
   location: locationSchema,
-  
+
   // Pricing
   final_price: z.number().positive('Final price must be positive'),
   delivery_cost: z.number().nonnegative('Delivery cost must be non-negative'),

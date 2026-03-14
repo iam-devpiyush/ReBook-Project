@@ -1,26 +1,18 @@
 /**
  * Book Condition Analysis Service
- * 
- * Analyzes book condition from images and assigns component scores.
- * 
- * Requirements:
- * - 2.8: Analyze cover damage, page quality, binding quality, markings, discoloration
- * - 2.9: Assign component scores (1-5) for each factor
- * - 2.10: Calculate weighted average for overall condition score
+ *
+ * Analyzes book condition from images using heuristic scoring.
+ * Scores are 1-5 where 5 = best condition, 1 = worst.
  */
 
-// ============================================================================
-// Type Definitions
-// ============================================================================
-
 export interface ConditionAnalysis {
-  cover_damage: number; // 1-5 (5 = no damage, 1 = severe damage)
-  page_quality: number; // 1-5 (5 = pristine, 1 = poor)
-  binding_quality: number; // 1-5 (5 = tight, 1 = loose/broken)
-  markings: number; // 1-5 (5 = no markings, 1 = heavy markings)
-  discoloration: number; // 1-5 (5 = no discoloration, 1 = severe)
-  overall_score: number; // 1-5 (weighted average)
-  confidence: number; // 0-1 (confidence in analysis)
+  cover_damage: number;
+  page_quality: number;
+  binding_quality: number;
+  markings: number;
+  discoloration: number;
+  overall_score: number;
+  confidence: number;
   notes: string;
 }
 
@@ -31,304 +23,181 @@ export interface BookImages {
   pages: string;
 }
 
-// ============================================================================
-// Condition Analysis Weights
-// ============================================================================
+const WEIGHTS = {
+  cover_damage: 0.25,
+  page_quality: 0.30,
+  binding_quality: 0.20,
+  markings: 0.15,
+  discoloration: 0.10,
+};
 
 /**
- * Weights for calculating overall condition score
- * 
- * These weights determine the importance of each factor in the final score.
+ * Analyze image brightness and color variance from a URL.
+ * Works with both https:// URLs and data: URLs.
+ * Returns metrics used to estimate condition scores.
  */
-const CONDITION_WEIGHTS = {
-  cover_damage: 0.25,      // 25% - Cover is highly visible
-  page_quality: 0.30,      // 30% - Pages are most important for usability
-  binding_quality: 0.20,   // 20% - Binding affects durability
-  markings: 0.15,          // 15% - Markings affect readability
-  discoloration: 0.10      // 10% - Discoloration is less critical
-} as const;
+async function analyzeImageMetrics(imageUrl: string): Promise<{
+  brightness: number;   // 0-255 average pixel brightness
+  variance: number;     // color variance (higher = more varied/damaged)
+  yellowness: number;   // 0-1 ratio of yellowish pixels (discoloration)
+}> {
+  try {
+    // Fetch image as buffer
+    let buffer: Buffer;
 
-// ============================================================================
-// Heuristic Analysis Functions
-// ============================================================================
+    if (imageUrl.startsWith('data:')) {
+      // data URL — decode base64
+      const base64 = imageUrl.split(',')[1];
+      buffer = Buffer.from(base64, 'base64');
+    } else {
+      // Remote URL — fetch it
+      const res = await fetch(imageUrl, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
+      buffer = Buffer.from(await res.arrayBuffer());
+    }
 
-/**
- * Analyze cover damage from front and back cover images
- * 
- * This is a simplified heuristic-based analysis.
- * In production, this could use ML models for image analysis.
- * 
- * @param frontCoverUrl - Front cover image URL
- * @param backCoverUrl - Back cover image URL
- * @returns Cover damage score (1-5)
- */
-async function analyzeCoverDamage(
-  frontCoverUrl: string,
-  backCoverUrl: string
-): Promise<number> {
-  // Simplified heuristic: Default to "Good" condition (3)
-  // In production, this would use image analysis to detect:
-  // - Tears, creases, scratches
-  // - Corner damage
-  // - Spine damage
-  // - Cover wear
-  
-  // For now, return a default score
-  // TODO: Implement actual image analysis
-  return 3;
+    // Use sharp for pixel analysis
+    const sharp = (await import('sharp')).default;
+    const { data, info } = await sharp(buffer)
+      .resize(100, 100, { fit: 'cover' }) // Downsample for speed
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const pixels = info.width * info.height;
+    let totalBrightness = 0;
+    let yellowPixels = 0;
+    let brightnessValues: number[] = [];
+
+    for (let i = 0; i < data.length; i += info.channels) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const brightness = (r + g + b) / 3;
+      totalBrightness += brightness;
+      brightnessValues.push(brightness);
+
+      // Yellow = high R, high G, low B
+      if (r > 180 && g > 160 && b < 120) yellowPixels++;
+    }
+
+    const avgBrightness = totalBrightness / pixels;
+    const mean = avgBrightness;
+    const variance = brightnessValues.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / pixels;
+    const yellowness = yellowPixels / pixels;
+
+    return { brightness: avgBrightness, variance, yellowness };
+  } catch {
+    // Return neutral defaults on failure
+    return { brightness: 180, variance: 1000, yellowness: 0.05 };
+  }
 }
 
 /**
- * Analyze page quality from pages image
- * 
- * @param pagesUrl - Pages image URL
- * @returns Page quality score (1-5)
+ * Convert image metrics to a 1-5 condition score.
  */
-async function analyzePageQuality(pagesUrl: string): Promise<number> {
-  // Simplified heuristic: Default to "Good" condition (3)
-  // In production, this would analyze:
-  // - Page yellowing
-  // - Tears or missing pages
-  // - Water damage
-  // - Page cleanliness
-  
-  // For now, return a default score
-  // TODO: Implement actual image analysis
-  return 3;
+function metricsToScore(metrics: { brightness: number; variance: number; yellowness: number }, type: 'cover' | 'pages' | 'spine'): number {
+  let score = 4; // Start optimistic
+
+  if (type === 'cover') {
+    // Very dark or very bright covers may indicate damage
+    if (metrics.brightness < 80 || metrics.brightness > 240) score -= 1;
+    // High variance = lots of scratches/marks
+    if (metrics.variance > 3000) score -= 1;
+    if (metrics.variance > 5000) score -= 1;
+  }
+
+  if (type === 'pages') {
+    // Yellow pages = discoloration/age
+    if (metrics.yellowness > 0.15) score -= 1;
+    if (metrics.yellowness > 0.30) score -= 1;
+    // Very dark pages = heavy markings or damage
+    if (metrics.brightness < 150) score -= 1;
+  }
+
+  if (type === 'spine') {
+    // High variance on spine = creases/damage
+    if (metrics.variance > 2500) score -= 1;
+    if (metrics.variance > 4000) score -= 1;
+  }
+
+  return Math.max(1, Math.min(5, score));
 }
 
-/**
- * Analyze binding quality from spine image
- * 
- * @param spineUrl - Spine image URL
- * @returns Binding quality score (1-5)
- */
-async function analyzeBindingQuality(spineUrl: string): Promise<number> {
-  // Simplified heuristic: Default to "Good" condition (3)
-  // In production, this would analyze:
-  // - Spine integrity
-  // - Binding tightness
-  // - Loose pages
-  // - Broken spine
-  
-  // For now, return a default score
-  // TODO: Implement actual image analysis
-  return 3;
+function calculateOverallScore(components: Omit<ConditionAnalysis, 'overall_score' | 'confidence' | 'notes'>): number {
+  const weighted =
+    components.cover_damage * WEIGHTS.cover_damage +
+    components.page_quality * WEIGHTS.page_quality +
+    components.binding_quality * WEIGHTS.binding_quality +
+    components.markings * WEIGHTS.markings +
+    components.discoloration * WEIGHTS.discoloration;
+  return Math.max(1, Math.min(5, Math.round(weighted)));
 }
 
-/**
- * Analyze markings from pages image
- * 
- * @param pagesUrl - Pages image URL
- * @returns Markings score (1-5)
- */
-async function analyzeMarkings(pagesUrl: string): Promise<number> {
-  // Simplified heuristic: Default to "Good" condition (3)
-  // In production, this would detect:
-  // - Highlighting
-  // - Underlining
-  // - Handwritten notes
-  // - Stamps or stickers
-  
-  // For now, return a default score
-  // TODO: Implement actual image analysis
-  return 3;
-}
-
-/**
- * Analyze discoloration from all images
- * 
- * @param images - All book images
- * @returns Discoloration score (1-5)
- */
-async function analyzeDiscoloration(images: BookImages): Promise<number> {
-  // Simplified heuristic: Default to "Good" condition (3)
-  // In production, this would analyze:
-  // - Page yellowing
-  // - Cover fading
-  // - Stains or spots
-  // - Overall color degradation
-  
-  // For now, return a default score
-  // TODO: Implement actual image analysis
-  return 3;
-}
-
-// ============================================================================
-// Overall Condition Calculation
-// ============================================================================
-
-/**
- * Calculate overall condition score from component scores
- * 
- * Uses weighted average based on CONDITION_WEIGHTS.
- * 
- * Requirement 2.10: Calculate weighted average for overall condition score
- * 
- * @param components - Component scores
- * @returns Overall condition score (1-5)
- */
-function calculateOverallScore(components: {
-  cover_damage: number;
-  page_quality: number;
-  binding_quality: number;
-  markings: number;
-  discoloration: number;
-}): number {
-  const weightedSum = 
-    components.cover_damage * CONDITION_WEIGHTS.cover_damage +
-    components.page_quality * CONDITION_WEIGHTS.page_quality +
-    components.binding_quality * CONDITION_WEIGHTS.binding_quality +
-    components.markings * CONDITION_WEIGHTS.markings +
-    components.discoloration * CONDITION_WEIGHTS.discoloration;
-  
-  // Round to nearest integer (1-5)
-  return Math.round(weightedSum);
-}
-
-/**
- * Generate condition notes based on scores
- * 
- * @param components - Component scores
- * @returns Human-readable condition notes
- */
-function generateConditionNotes(components: {
-  cover_damage: number;
-  page_quality: number;
-  binding_quality: number;
-  markings: number;
-  discoloration: number;
-}): string {
+function generateNotes(components: Omit<ConditionAnalysis, 'overall_score' | 'confidence' | 'notes'>): string {
   const notes: string[] = [];
-  
-  // Cover damage
-  if (components.cover_damage >= 4) {
-    notes.push('Cover is in excellent condition');
-  } else if (components.cover_damage <= 2) {
-    notes.push('Cover shows significant wear');
-  }
-  
-  // Page quality
-  if (components.page_quality >= 4) {
-    notes.push('Pages are clean and crisp');
-  } else if (components.page_quality <= 2) {
-    notes.push('Pages show signs of wear or damage');
-  }
-  
-  // Binding quality
-  if (components.binding_quality >= 4) {
-    notes.push('Binding is tight and secure');
-  } else if (components.binding_quality <= 2) {
-    notes.push('Binding may be loose or damaged');
-  }
-  
-  // Markings
-  if (components.markings >= 4) {
-    notes.push('No visible markings or highlights');
-  } else if (components.markings <= 2) {
-    notes.push('Contains markings, highlights, or notes');
-  }
-  
-  // Discoloration
-  if (components.discoloration >= 4) {
-    notes.push('No discoloration or yellowing');
-  } else if (components.discoloration <= 2) {
-    notes.push('Shows discoloration or yellowing');
-  }
-  
+  if (components.cover_damage >= 4) notes.push('Cover in good condition');
+  else if (components.cover_damage <= 2) notes.push('Cover shows significant wear');
+  if (components.page_quality >= 4) notes.push('Pages clean and crisp');
+  else if (components.page_quality <= 2) notes.push('Pages show wear or damage');
+  if (components.binding_quality <= 2) notes.push('Binding may be loose');
+  if (components.markings <= 2) notes.push('Contains markings or highlights');
+  if (components.discoloration <= 2) notes.push('Shows discoloration or yellowing');
   return notes.length > 0 ? notes.join('. ') + '.' : 'Book is in acceptable condition.';
 }
 
-// ============================================================================
-// Main Analysis Function
-// ============================================================================
-
-/**
- * Analyze book condition from images
- * 
- * Requirements:
- * - 2.8: Analyze cover damage, page quality, binding quality, markings, discoloration
- * - 2.9: Assign component scores (1-5) for each factor
- * - 2.10: Calculate weighted average for overall condition score
- * 
- * @param images - Book images (front_cover, back_cover, spine, pages)
- * @returns Condition analysis with component scores and overall score
- */
 export async function analyzeBookCondition(images: BookImages): Promise<ConditionAnalysis> {
   try {
-    console.log('Starting condition analysis...');
-    
-    // Analyze each component
-    const [
-      coverDamage,
-      pageQuality,
-      bindingQuality,
-      markings,
-      discoloration
-    ] = await Promise.all([
-      analyzeCoverDamage(images.front_cover, images.back_cover),
-      analyzePageQuality(images.pages),
-      analyzeBindingQuality(images.spine),
-      analyzeMarkings(images.pages),
-      analyzeDiscoloration(images)
+    const [frontMetrics, backMetrics, spineMetrics, pagesMetrics] = await Promise.all([
+      analyzeImageMetrics(images.front_cover),
+      analyzeImageMetrics(images.back_cover),
+      analyzeImageMetrics(images.spine),
+      analyzeImageMetrics(images.pages),
     ]);
-    
-    // Ensure all scores are within valid range (1-5)
+
+    const cover_damage = Math.round(
+      (metricsToScore(frontMetrics, 'cover') + metricsToScore(backMetrics, 'cover')) / 2
+    );
+    const page_quality = metricsToScore(pagesMetrics, 'pages');
+    const binding_quality = metricsToScore(spineMetrics, 'spine');
+
+    // Markings: dark spots on pages suggest writing/highlighting
+    const markings = pagesMetrics.variance > 4000 ? 2 : pagesMetrics.variance > 2000 ? 3 : 4;
+
+    // Discoloration: based on yellowness of pages
+    const discoloration = pagesMetrics.yellowness > 0.3 ? 2
+      : pagesMetrics.yellowness > 0.15 ? 3
+        : pagesMetrics.yellowness > 0.05 ? 4
+          : 5;
+
     const components = {
-      cover_damage: Math.max(1, Math.min(5, coverDamage)),
-      page_quality: Math.max(1, Math.min(5, pageQuality)),
-      binding_quality: Math.max(1, Math.min(5, bindingQuality)),
+      cover_damage: Math.max(1, Math.min(5, cover_damage)),
+      page_quality: Math.max(1, Math.min(5, page_quality)),
+      binding_quality: Math.max(1, Math.min(5, binding_quality)),
       markings: Math.max(1, Math.min(5, markings)),
-      discoloration: Math.max(1, Math.min(5, discoloration))
+      discoloration: Math.max(1, Math.min(5, discoloration)),
     };
-    
-    // Calculate overall score
-    const overallScore = calculateOverallScore(components);
-    
-    // Generate notes
-    const notes = generateConditionNotes(components);
-    
-    console.log('Condition analysis complete:', { overallScore, components });
-    
+
     return {
       ...components,
-      overall_score: overallScore,
-      confidence: 0.75, // Default confidence for heuristic analysis
-      notes
+      overall_score: calculateOverallScore(components),
+      confidence: 0.7,
+      notes: generateNotes(components),
     };
-    
+
   } catch (error) {
     console.error('Condition analysis error:', error);
-    
-    // Return default "Good" condition on error
     return {
-      cover_damage: 3,
-      page_quality: 3,
-      binding_quality: 3,
-      markings: 3,
-      discoloration: 3,
-      overall_score: 3,
-      confidence: 0.5,
-      notes: 'Condition analysis failed. Default condition assigned.'
+      cover_damage: 3, page_quality: 3, binding_quality: 3,
+      markings: 3, discoloration: 3, overall_score: 3,
+      confidence: 0.3,
+      notes: 'Condition estimated as average.',
     };
   }
 }
 
-/**
- * Validate condition analysis result
- * 
- * @param analysis - Condition analysis to validate
- * @returns True if all scores are valid (1-5)
- */
 export function validateConditionAnalysis(analysis: ConditionAnalysis): boolean {
-  const scores = [
-    analysis.cover_damage,
-    analysis.page_quality,
-    analysis.binding_quality,
-    analysis.markings,
-    analysis.discoloration,
-    analysis.overall_score
-  ];
-  
-  return scores.every(score => score >= 1 && score <= 5);
+  return [
+    analysis.cover_damage, analysis.page_quality, analysis.binding_quality,
+    analysis.markings, analysis.discoloration, analysis.overall_score
+  ].every(s => s >= 1 && s <= 5);
 }

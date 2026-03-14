@@ -4,6 +4,11 @@
  * **Validates: Requirements 4.1-4.10**
  * 
  * These tests verify that the pricing formula holds for all valid inputs.
+ * 
+ * Pure synchronous properties run 1000 cases each.
+ * Async integration properties (which call the shipping API with a simulated
+ * 100ms delay) run 20 cases each to keep the test suite fast while still
+ * providing meaningful coverage.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -11,6 +16,9 @@ import * as fc from 'fast-check';
 import {
   calculateEnhancedPricing,
   getConditionMultiplier,
+  calculatePlatformCommission,
+  calculatePaymentFees,
+  calculateSellerPayout,
   validatePricing,
 } from '../pricing-engine';
 
@@ -26,7 +34,169 @@ const locationArbitrary = fc.record({
 const originalPriceArbitrary = fc.double({ min: 10, max: 10000, noNaN: true });
 const conditionScoreArbitrary = fc.integer({ min: 1, max: 5 });
 
-describe('Enhanced Pricing Formula Correctness', () => {
+// ─── Pure synchronous properties (1000 runs each) ────────────────────────────
+
+describe('Enhanced Pricing Formula Correctness — Pure Properties', () => {
+  /**
+   * Property: Condition multipliers are correct for each score
+   * **Validates: Requirements 4.1**
+   */
+  it('Property: Condition multipliers are correct for each score', () => {
+    const expectedMultipliers: Record<number, number> = {
+      5: 0.80,
+      4: 0.70,
+      3: 0.60,
+      2: 0.40,
+      1: 0.25,
+    };
+
+    for (let score = 1; score <= 5; score++) {
+      const multiplier = getConditionMultiplier(score);
+      expect(multiplier).toBe(expectedMultipliers[score]);
+    }
+  });
+
+  /**
+   * Property: Base price equals original price times condition multiplier
+   * **Validates: Requirements 4.1, 4.2**
+   */
+  it('Property: Base price equals original price times condition multiplier (pure)', () => {
+    fc.assert(
+      fc.property(originalPriceArbitrary, conditionScoreArbitrary, (originalPrice, conditionScore) => {
+        const multiplier = getConditionMultiplier(conditionScore);
+        const basePrice = originalPrice * multiplier;
+        expect(basePrice).toBeCloseTo(originalPrice * multiplier, 10);
+        expect(multiplier).toBeGreaterThan(0);
+        expect(multiplier).toBeLessThanOrEqual(1);
+      }),
+      { numRuns: 1000 }
+    );
+  });
+
+  /**
+   * Property: Platform commission is always 10% of base price
+   * **Validates: Requirements 4.4**
+   */
+  it('Property: Platform commission is always 10% of base price (pure)', () => {
+    fc.assert(
+      fc.property(originalPriceArbitrary, conditionScoreArbitrary, (originalPrice, conditionScore) => {
+        const multiplier = getConditionMultiplier(conditionScore);
+        const basePrice = originalPrice * multiplier;
+        const commission = calculatePlatformCommission(basePrice);
+        expect(commission).toBeCloseTo(basePrice * 0.10, 10);
+      }),
+      { numRuns: 1000 }
+    );
+  });
+
+  /**
+   * Property: Payment fees equal (base_price × 0.025) + 3.00
+   * **Validates: Requirements 4.5**
+   */
+  it('Property: Payment fees equal (base_price × 0.025) + 3.00 (pure)', () => {
+    fc.assert(
+      fc.property(originalPriceArbitrary, conditionScoreArbitrary, (originalPrice, conditionScore) => {
+        const multiplier = getConditionMultiplier(conditionScore);
+        const basePrice = originalPrice * multiplier;
+        const fees = calculatePaymentFees(basePrice);
+        expect(fees).toBeCloseTo((basePrice * 0.025) + 3.00, 10);
+      }),
+      { numRuns: 1000 }
+    );
+  });
+
+  /**
+   * Property: Seller payout equals base price minus platform commission
+   * **Validates: Requirements 4.7**
+   */
+  it('Property: Seller payout equals base price minus platform commission (pure)', () => {
+    fc.assert(
+      fc.property(originalPriceArbitrary, conditionScoreArbitrary, (originalPrice, conditionScore) => {
+        const multiplier = getConditionMultiplier(conditionScore);
+        const basePrice = originalPrice * multiplier;
+        const commission = calculatePlatformCommission(basePrice);
+        const payout = calculateSellerPayout(basePrice, commission);
+        expect(payout).toBeCloseTo(basePrice - commission, 10);
+        expect(payout).toBeCloseTo(basePrice * 0.90, 10);
+      }),
+      { numRuns: 1000 }
+    );
+  });
+
+  /**
+   * Property: All pure pricing components are non-negative
+   * **Validates: Requirements 4.1-4.7**
+   */
+  it('Property: All pure pricing components are non-negative', () => {
+    fc.assert(
+      fc.property(originalPriceArbitrary, conditionScoreArbitrary, (originalPrice, conditionScore) => {
+        const multiplier = getConditionMultiplier(conditionScore);
+        const basePrice = originalPrice * multiplier;
+        const commission = calculatePlatformCommission(basePrice);
+        const fees = calculatePaymentFees(basePrice);
+        const payout = calculateSellerPayout(basePrice, commission);
+        expect(basePrice).toBeGreaterThanOrEqual(0);
+        expect(commission).toBeGreaterThanOrEqual(0);
+        expect(fees).toBeGreaterThanOrEqual(0);
+        expect(payout).toBeGreaterThanOrEqual(0);
+      }),
+      { numRuns: 1000 }
+    );
+  });
+
+  /**
+   * Property: Higher condition scores result in higher base prices
+   * **Validates: Requirements 4.1**
+   */
+  it('Property: Higher condition scores result in higher base prices (pure)', () => {
+    fc.assert(
+      fc.property(originalPriceArbitrary, (originalPrice) => {
+        const basePrice1 = originalPrice * getConditionMultiplier(1);
+        const basePrice5 = originalPrice * getConditionMultiplier(5);
+        expect(basePrice5).toBeGreaterThan(basePrice1);
+      }),
+      { numRuns: 1000 }
+    );
+  });
+
+  /**
+   * Property: Condition multipliers are monotonically increasing with score
+   * **Validates: Requirements 4.1**
+   */
+  it('Property: Condition multipliers are monotonically increasing with score', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 4 }),
+        (score) => {
+          const lower = getConditionMultiplier(score);
+          const higher = getConditionMultiplier(score + 1);
+          expect(higher).toBeGreaterThan(lower);
+        }
+      ),
+      { numRuns: 1000 }
+    );
+  });
+
+  /**
+   * Property: Payment fees are always at least ₹3.00 (the fixed component)
+   * **Validates: Requirements 4.5**
+   */
+  it('Property: Payment fees are always at least ₹3.00', () => {
+    fc.assert(
+      fc.property(originalPriceArbitrary, conditionScoreArbitrary, (originalPrice, conditionScore) => {
+        const multiplier = getConditionMultiplier(conditionScore);
+        const basePrice = originalPrice * multiplier;
+        const fees = calculatePaymentFees(basePrice);
+        expect(fees).toBeGreaterThanOrEqual(3.00);
+      }),
+      { numRuns: 1000 }
+    );
+  });
+});
+
+// ─── Async integration properties (50 runs each — shipping API has 100ms delay) ─
+
+describe('Enhanced Pricing Formula Correctness — Integration Properties', () => {
   it('Property: Base price equals original price times condition multiplier', async () => {
     await fc.assert(
       fc.asyncProperty(
@@ -49,7 +219,7 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(pricing.condition_multiplier).toBe(expectedMultiplier);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
 
@@ -72,7 +242,7 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(pricing.platform_commission).toBeCloseTo(expectedCommission, 2);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
 
@@ -95,7 +265,7 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(pricing.payment_fees).toBeCloseTo(expectedFees, 2);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
 
@@ -124,7 +294,7 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(Math.abs(pricing.final_price - expectedFinalPrice)).toBeLessThanOrEqual(1);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
 
@@ -146,7 +316,7 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(Number.isInteger(pricing.final_price)).toBe(true);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
 
@@ -174,24 +344,9 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(pricing.seller_payout).toBeGreaterThanOrEqual(0);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
-
-  it('Property: Condition multipliers are correct for each score', () => {
-    const expectedMultipliers: Record<number, number> = {
-      5: 0.80,
-      4: 0.70,
-      3: 0.60,
-      2: 0.40,
-      1: 0.25,
-    };
-
-    for (let score = 1; score <= 5; score++) {
-      const multiplier = getConditionMultiplier(score);
-      expect(multiplier).toBe(expectedMultipliers[score]);
-    }
-  });
 
   it('Property: Delivery cost is always positive', async () => {
     await fc.assert(
@@ -211,7 +366,7 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(pricing.delivery_cost).toBeGreaterThan(0);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
 
@@ -234,7 +389,7 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(validatePricing(pricing)).toBe(true);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
 
@@ -261,7 +416,7 @@ describe('Enhanced Pricing Formula Correctness', () => {
           expect(pricing5.base_price).toBeGreaterThan(pricing1.base_price);
         }
       ),
-      { numRuns: 10 }
+      { numRuns: 20 }
     );
   }, 60000);
 });

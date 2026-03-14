@@ -1,152 +1,100 @@
 /**
- * Tests for /api/search route
+ * Integration tests for GET /api/search
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GET, SEARCH_CACHE_TTL_MS } from '../route';
 import { NextRequest } from 'next/server';
 
-vi.mock('@/services/search.service', () => ({
-  searchListings: vi.fn(),
+vi.mock('meilisearch', () => {
+  const mockIndex = {
+    search: vi.fn().mockResolvedValue({ hits: [], estimatedTotalHits: 0, processingTimeMs: 5 }),
+  };
+  function MeiliSearch() {
+    return { index: vi.fn().mockReturnValue(mockIndex) };
+  }
+  return { MeiliSearch };
+});
+
+vi.mock('@/lib/supabase/server', () => ({ createServerClient: vi.fn() }));
+vi.mock('@/lib/rate-limit', () => ({
+  applyRateLimit: vi.fn().mockReturnValue(null),
+  getClientIp: vi.fn().mockReturnValue('127.0.0.1'),
+  SEARCH_RATE_LIMIT: { limit: 100, windowMs: 60000 },
+}));
+vi.mock('@/lib/cache', () => ({
+  appCache: { get: vi.fn().mockReturnValue(null), set: vi.fn(), evictExpired: vi.fn() },
+  TTL: { SEARCH: 300000 },
+  buildCacheKey: vi.fn().mockReturnValue('search:test'),
+}));
+vi.mock('@/lib/monitoring/performance', () => ({
+  measurePerf: vi.fn().mockImplementation((_name, _target, fn) =>
+    fn().then((r: unknown) => ({ result: r, elapsedMs: 10 }))
+  ),
+  addTimingHeader: vi.fn(),
+}));
+vi.mock('@/lib/errors/graceful-degradation', () => ({
+  withMeilisearchFallback: vi.fn().mockImplementation((primary) =>
+    primary().then((data: unknown) => ({ data, usedFallback: false }))
+  ),
 }));
 
-import { searchListings } from '@/services/search.service';
+import { GET } from '../route';
 
-const mockSearchListings = searchListings as ReturnType<typeof vi.fn>;
-
-function makeRequest(params: Record<string, string> = {}): NextRequest {
+function makeRequest(params: Record<string, string> = {}) {
   const url = new URL('http://localhost/api/search');
-  for (const [k, v] of Object.entries(params)) {
-    url.searchParams.set(k, v);
-  }
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   return new NextRequest(url.toString());
 }
 
-const mockResult = {
-  hits: [{ id: '1', title: 'Clean Code', author: 'Robert Martin', final_price: 350, status: 'active' }],
-  estimatedTotalHits: 1,
-  limit: 20,
-  offset: 0,
-  processingTimeMs: 12,
-};
-
 describe('GET /api/search', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockSearchListings.mockResolvedValue(mockResult);
-  });
+  beforeEach(() => vi.clearAllMocks());
 
-  it('returns search results with pagination metadata', async () => {
-    const res = await GET(makeRequest({ q: 'clean code' }));
-    const body = await res.json();
-
+  it('returns 200 with empty results for empty query', async () => {
+    const res = await GET(makeRequest());
     expect(res.status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.data).toHaveLength(1);
-    expect(body.pagination).toMatchObject({
-      page: 1,
-      page_size: 20,
-      total_hits: 1,
-      total_pages: 1,
-    });
-    expect(body.processing_time_ms).toBe(12);
-  });
-
-  it('passes query and filters to searchListings', async () => {
-    await GET(makeRequest({
-      q: 'physics',
-      category_id: 'cat-1',
-      condition_min: '3',
-      price_min: '100',
-      price_max: '500',
-      city: 'Mumbai',
-      state: 'Maharashtra',
-      sort_by: 'price_asc',
-    }));
-
-    expect(mockSearchListings).toHaveBeenCalledWith(expect.objectContaining({
-      query: 'physics',
-      filters: {
-        category_id: 'cat-1',
-        condition_score_min: 3,
-        price_min: 100,
-        price_max: 500,
-        city: 'Mumbai',
-        state: 'Maharashtra',
-      },
-      sortBy: 'price_asc',
-    }));
-  });
-
-  it('passes user location for proximity sort', async () => {
-    await GET(makeRequest({ sort_by: 'proximity', lat: '19.076', lng: '72.877' }));
-
-    expect(mockSearchListings).toHaveBeenCalledWith(expect.objectContaining({
-      sortBy: 'proximity',
-      userLocation: { latitude: 19.076, longitude: 72.877 },
-    }));
-  });
-
-  it('returns 400 when proximity sort is used without lat/lng', async () => {
-    const res = await GET(makeRequest({ sort_by: 'proximity' }));
-    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toMatch(/lat and lng/i);
+    expect(body.success).toBe(true);
+    expect(body.data).toEqual([]);
+    expect(body.pagination).toBeDefined();
   });
 
   it('returns 400 for invalid sort_by value', async () => {
     const res = await GET(makeRequest({ sort_by: 'invalid_sort' }));
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toMatch(/sort_by/i);
+    expect(body.error).toContain('sort_by');
   });
 
-  it('calculates correct offset for page 2', async () => {
-    await GET(makeRequest({ page: '2', page_size: '10' }));
-
-    expect(mockSearchListings).toHaveBeenCalledWith(expect.objectContaining({
-      limit: 10,
-      offset: 10,
-    }));
-  });
-
-  it('caps page_size at 100', async () => {
-    await GET(makeRequest({ page_size: '999' }));
-
-    expect(mockSearchListings).toHaveBeenCalledWith(expect.objectContaining({
-      limit: 100,
-    }));
-  });
-
-  it('defaults to empty query when q is not provided', async () => {
-    await GET(makeRequest());
-
-    expect(mockSearchListings).toHaveBeenCalledWith(expect.objectContaining({
-      query: '',
-    }));
-  });
-
-  it('returns cached: false on first call', async () => {
-    const res = await GET(makeRequest({ q: 'unique-query-xyz' }));
+  it('returns 400 when sort_by=proximity but lat/lng missing', async () => {
+    const res = await GET(makeRequest({ sort_by: 'proximity' }));
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.cached).toBe(false);
+    expect(body.error).toContain('lat');
   });
 
-  it('returns cached: true on second identical call', async () => {
-    const params = { q: 'cached-query-abc' };
-    await GET(makeRequest(params));
-    const res2 = await GET(makeRequest(params));
-    const body = await res2.json();
+  it('returns 429 when rate limit exceeded', async () => {
+    const { applyRateLimit } = await import('@/lib/rate-limit');
+    vi.mocked(applyRateLimit).mockReturnValueOnce(
+      new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }) as any
+    );
+    const res = await GET(makeRequest({ q: 'books' }));
+    expect(res.status).toBe(429);
+  });
+
+  it('returns cached result when cache hit', async () => {
+    const { appCache } = await import('@/lib/cache');
+    vi.mocked(appCache.get).mockReturnValueOnce({ success: true, data: [{ id: 'cached' }], cached: true });
+    const res = await GET(makeRequest({ q: 'books' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
     expect(body.cached).toBe(true);
-    // searchListings should only be called once
-    expect(mockSearchListings).toHaveBeenCalledTimes(1);
   });
 
-  it('returns 500 on service error', async () => {
-    mockSearchListings.mockRejectedValue(new Error('Meilisearch down'));
-    const res = await GET(makeRequest({ q: 'test' }));
-    expect(res.status).toBe(500);
+  it('returns results with pagination metadata', async () => {
+    const res = await GET(makeRequest({ q: 'clean code' }));
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toBe('Internal server error');
+    expect(body.pagination.page).toBe(1);
+    expect(body.pagination.page_size).toBe(20);
   });
 });

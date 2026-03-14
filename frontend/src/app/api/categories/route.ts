@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
+import { appCache, TTL } from '@/lib/cache';
 
 export interface Category {
   id: string;
@@ -46,8 +47,16 @@ export function wouldCreateCycle(
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient();
     const tree = request.nextUrl.searchParams.get('tree') === 'true';
+    const cacheKey = `categories:${tree ? 'tree' : 'flat'}`;
+
+    // Return cached result if available (TTL: 24 hours — Requirement 22.8)
+    const cached = appCache.get<Category[] | { success: boolean; data: Category[] }>(cacheKey);
+    if (cached) {
+      return NextResponse.json({ success: true, data: cached, cached: true });
+    }
+
+    const supabase = createServerClient();
 
     const { data: categories, error } = await supabase
       .from('categories')
@@ -60,6 +69,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (!tree) {
+      appCache.set(cacheKey, categories, TTL.CATEGORIES);
       return NextResponse.json({ success: true, data: categories });
     }
 
@@ -79,6 +89,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    appCache.set(cacheKey, roots, TTL.CATEGORIES);
     return NextResponse.json({ success: true, data: roots });
   } catch (error) {
     console.error('Error in GET /api/categories:', error);

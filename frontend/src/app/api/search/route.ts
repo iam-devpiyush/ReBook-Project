@@ -7,34 +7,84 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { searchListings, type SearchFilters, type SortBy } from '@/services/search.service';
+import { MeiliSearch } from 'meilisearch';
+import type { SearchFilters, SortBy, ListingDocument } from '@/services/search.service';
+import { applyRateLimit, getClientIp, SEARCH_RATE_LIMIT } from '@/lib/rate-limit';
+import { withMeilisearchFallback } from '@/lib/errors/graceful-degradation';
+import { createServerClient } from '@/lib/supabase/server';
+import { appCache, TTL, buildCacheKey } from '@/lib/cache';
+import { measurePerf, addTimingHeader } from '@/lib/monitoring/performance';
 
-/** In-memory cache for popular queries (5-minute TTL) */
-interface CacheEntry {
-  data: unknown;
-  timestamp: number;
+const meiliClient = new MeiliSearch({
+  host: process.env.MEILISEARCH_HOST || 'http://localhost:7700',
+  apiKey: process.env.MEILISEARCH_API_KEY || '',
+});
+
+function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-const searchCache = new Map<string, CacheEntry>();
-export const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+async function searchListings(options: {
+  query: string;
+  filters?: SearchFilters;
+  userLocation?: { latitude: number; longitude: number };
+  sortBy?: SortBy;
+  limit?: number;
+  offset?: number;
+}) {
+  const index = meiliClient.index('listings');
+  const filterParts: string[] = ['status = "active"'];
+  const f = options.filters ?? {};
+  if (f.category_id) filterParts.push(`category_id = "${f.category_id}"`);
+  if (f.condition_score_min != null) filterParts.push(`condition_score >= ${f.condition_score_min}`);
+  if (f.price_min != null) filterParts.push(`final_price >= ${f.price_min}`);
+  if (f.price_max != null) filterParts.push(`final_price <= ${f.price_max}`);
+  if (f.city) filterParts.push(`location.city = "${f.city}"`);
+  if (f.state) filterParts.push(`location.state = "${f.state}"`);
+
+  const sortBy = options.sortBy;
+  let meiliSort: string[] | undefined;
+  if (sortBy === 'price_asc') meiliSort = ['final_price:asc'];
+  else if (sortBy === 'price_desc') meiliSort = ['final_price:desc'];
+  else if (sortBy === 'condition_desc') meiliSort = ['condition_score:desc'];
+  else if (sortBy === 'date_desc') meiliSort = ['created_at:desc'];
+
+  const limit = options.limit ?? 20;
+  const offset = options.offset ?? 0;
+  const fetchLimit = sortBy === 'proximity' && options.userLocation ? Math.min(limit * 5, 200) : limit;
+
+  const result = await index.search(options.query, {
+    filter: filterParts.join(' AND '),
+    limit: fetchLimit,
+    offset: sortBy === 'proximity' ? 0 : offset,
+    sort: meiliSort,
+  });
+
+  let hits = result.hits as ListingDocument[];
+  if (sortBy === 'proximity' && options.userLocation) {
+    const { latitude: uLat, longitude: uLon } = options.userLocation;
+    hits = hits
+      .map((h) => ({ hit: h, dist: h.location.latitude != null && h.location.longitude != null ? haversineDistance(uLat, uLon, h.location.latitude, h.location.longitude) : Infinity }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(offset, offset + limit)
+      .map((x) => x.hit);
+  }
+
+  return { hits, estimatedTotalHits: result.estimatedTotalHits ?? 0, processingTimeMs: result.processingTimeMs };
+}
+
+/** In-memory cache for popular queries — delegated to shared appCache (5-minute TTL, Requirement 22.7) */
+export const SEARCH_CACHE_TTL_MS = TTL.SEARCH;
 
 /** Build a deterministic cache key from request params */
-function buildCacheKey(params: URLSearchParams): string {
-  const sorted = Array.from(params.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}=${v}`)
-    .join('&');
-  return sorted;
-}
-
-/** Evict expired entries (called lazily on each request) */
-function evictExpired(): void {
-  const now = Date.now();
-  for (const [key, entry] of searchCache.entries()) {
-    if (now - entry.timestamp >= SEARCH_CACHE_TTL_MS) {
-      searchCache.delete(key);
-    }
-  }
+function buildSearchCacheKey(params: URLSearchParams): string {
+  const entries: Record<string, string> = {};
+  params.forEach((v, k) => { entries[k] = v; });
+  return buildCacheKey('search', entries);
 }
 
 /**
@@ -56,7 +106,12 @@ function evictExpired(): void {
  */
 export async function GET(request: NextRequest) {
   try {
-    evictExpired();
+    // Rate limit: 100 requests per minute per IP (Requirement 18.1)
+    const ip = getClientIp(request);
+    const rateLimitResponse = applyRateLimit(request, `search:${ip}`, SEARCH_RATE_LIMIT);
+    if (rateLimitResponse) return rateLimitResponse;
+
+    appCache.evictExpired();
 
     const { searchParams } = request.nextUrl;
 
@@ -124,41 +179,102 @@ export async function GET(request: NextRequest) {
     const query = searchParams.get('q') || '';
 
     // Check cache
-    const cacheKey = buildCacheKey(searchParams);
-    const cached = searchCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < SEARCH_CACHE_TTL_MS) {
-      return NextResponse.json({ ...cached.data as object, cached: true });
+    const cacheKey = buildSearchCacheKey(searchParams);
+    const cached = appCache.get(cacheKey);
+    if (cached) {
+      return NextResponse.json({ ...cached as object, cached: true });
     }
 
-    // Execute search
-    const result = await searchListings({
-      query,
-      filters,
-      userLocation,
-      sortBy,
-      limit: pageSize,
-      offset,
-    });
+    // Execute search with Meilisearch → Supabase fallback (Requirement 19.5)
+    const { result, elapsedMs } = await measurePerf('GET /api/search', 'SEARCH', () =>
+      withMeilisearchFallback(
+        () => searchListings({ query, filters, userLocation, sortBy, limit: pageSize, offset }),
+        async () => {
+          // Supabase fallback: basic text search on title/author
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          // First get matching book IDs if there's a text query
+          let bookIds: string[] | null = null;
+          if (query) {
+            const { data: books } = await (supabase as any)
+              .from('books')
+              .select('id')
+              .or(`title.ilike.%${query}%,author.ilike.%${query}%`);
+            bookIds = (books ?? []).map((b: any) => b.id);
+            // If no books match the query, return empty
+            if (bookIds && bookIds.length === 0) {
+              return { hits: [] as unknown as ListingDocument[], estimatedTotalHits: 0, processingTimeMs: 0 };
+            }
+          }
+
+          let q = (supabase as any)
+            .from('listings')
+            .select('*, book:books(*)', { count: 'exact' })
+            .eq('status', 'active')
+            .range(offset, offset + pageSize - 1);
+
+          if (bookIds) q = q.in('book_id', bookIds);
+          if (filters.category_id) q = q.eq('category_id', filters.category_id);
+          if (filters.condition_score_min != null) q = q.gte('condition_score', filters.condition_score_min);
+          if (filters.price_min != null) q = q.gte('final_price', filters.price_min);
+          if (filters.price_max != null) q = q.lte('final_price', filters.price_max);
+          if (filters.city) q = q.ilike('city', `%${filters.city}%`);
+          if (filters.state) q = q.ilike('state', `%${filters.state}%`);
+
+          const { data, error, count } = await q;
+          if (error) throw error;
+
+          // Normalize to ListingDocument shape
+          const hits = (data ?? []).map((l: any) => ({
+            ...l,
+            title: l.book?.title ?? '',
+            author: l.book?.author ?? '',
+            subject: l.book?.subject,
+            isbn: l.book?.isbn,
+            publisher: l.book?.publisher,
+            description: l.book?.description,
+            category_id: l.book?.category_id ?? '',
+            location: { city: l.city ?? '', state: l.state ?? '', pincode: l.pincode ?? '', latitude: l.latitude, longitude: l.longitude },
+          })) as unknown as ListingDocument[];
+
+          return {
+            hits,
+            estimatedTotalHits: count ?? hits.length,
+            processingTimeMs: 0,
+          };
+        }
+      )
+    );
+
+    const { data: searchResult, usedFallback, fallbackReason } = result;
 
     const responseData = {
       success: true,
-      data: result.hits,
+      data: searchResult.hits,
       pagination: {
         page,
         page_size: pageSize,
-        total_hits: result.estimatedTotalHits,
-        total_pages: Math.ceil(result.estimatedTotalHits / pageSize),
+        total_hits: searchResult.estimatedTotalHits,
+        total_pages: Math.ceil(searchResult.estimatedTotalHits / pageSize),
       },
-      processing_time_ms: result.processingTimeMs,
+      processing_time_ms: elapsedMs,
       cached: false,
+      ...(usedFallback && { fallback: true, fallback_reason: fallbackReason }),
     };
 
-    // Cache the result
-    searchCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+    // Cache the result (5-minute TTL — Requirement 22.7)
+    appCache.set(cacheKey, responseData, TTL.SEARCH);
 
-    return NextResponse.json(responseData);
+    const response = NextResponse.json(responseData);
+    addTimingHeader(response.headers, elapsedMs, 'SEARCH');
+    return response;
   } catch (error) {
     console.error('Error in GET /api/search:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const { errorResponse } = await import('@/lib/errors');
+    return errorResponse(error);
   }
 }

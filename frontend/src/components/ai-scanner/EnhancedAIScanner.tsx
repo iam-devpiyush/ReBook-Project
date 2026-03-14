@@ -88,10 +88,14 @@ export default function EnhancedAIScanner({
     const detectPlatform = () => {
       const userAgent = navigator.userAgent.toLowerCase();
       const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
-      const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
       const isSmallScreen = window.innerWidth < 768;
 
-      return (isMobile || hasTouch || isSmallScreen) ? 'mobile' : 'desktop';
+      // Only use touch detection combined with small screen or UA match
+      // Avoid false positives on touch-enabled laptops/desktops
+      const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const isTouchMobile = hasTouch && isSmallScreen;
+
+      return (isMobile || isTouchMobile) ? 'mobile' : 'desktop';
     };
 
     setPlatform(detectPlatform());
@@ -119,7 +123,7 @@ export default function EnhancedAIScanner({
         },
         (payload: any) => {
           const { progress_percentage, scan_status } = payload.new;
-          
+
           // Update progress
           if (progress_percentage !== undefined) {
             const messages: Record<number, string> = {
@@ -204,7 +208,8 @@ export default function EnhancedAIScanner({
       });
 
       if (!response.ok) {
-        throw new Error('Image upload failed');
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error || errData?.details || `Upload failed (${response.status})`);
       }
 
       const data = await response.json();
@@ -220,7 +225,7 @@ export default function EnhancedAIScanner({
 
     } catch (err) {
       console.error('Upload error:', err);
-      setError('Failed to upload images');
+      setError(err instanceof Error ? err.message : 'Failed to upload images');
       return null;
     }
   };
@@ -237,36 +242,66 @@ export default function EnhancedAIScanner({
 
     setIsScanning(true);
     setError(null);
-    setScanProgress({ percentage: 0, message: 'Uploading images...' });
+    setScanProgress({ percentage: 0, message: 'Analyzing your book...' });
 
     try {
-      // Upload images
-      const urls = await uploadImages();
-      if (!urls) {
-        throw new Error('Image upload failed');
-      }
-
-      // Start AI scan
-      const response = await fetch('/api/ai/scan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          scan_id: scanId,
-          images: urls
-        })
+      // Build image map from captured data URLs — no upload needed for scanning
+      const imageDataUrls: Record<ImageType, string> = {} as any;
+      capturedImages.forEach(img => {
+        imageDataUrls[img.type] = img.preview; // preview is a data URL
       });
 
+      setScanProgress({ percentage: 20, message: 'Detecting ISBN...' });
+
+      // Start AI scan with data URLs directly
+      const response = await fetch('/api/ai/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scan_id: scanId, images: imageDataUrls })
+      });
+
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('AI scan failed');
+        throw new Error(data?.error || data?.details || `Scan failed (${response.status})`);
       }
 
-      // Progress updates will come via Realtime subscription
+      // Use the HTTP response directly as the primary result source.
+      // Realtime subscription will also update progress, but we don't depend on it.
+      if (data.success && data.result) {
+        const result: ScanResult = {
+          detected_isbn: data.result.detected_isbn,
+          book_metadata: data.result.book_metadata,
+          condition_analysis: data.result.condition_analysis
+        };
+
+        setScanProgress({ percentage: 80, message: 'Uploading images...' });
+
+        // Upload images to storage (best-effort — scan already succeeded)
+        let finalUrls: Record<ImageType, string>;
+        const uploaded = await uploadImages();
+        if (uploaded) {
+          finalUrls = uploaded;
+        } else {
+          // Fall back to data URLs if storage upload fails
+          finalUrls = {} as Record<ImageType, string>;
+          capturedImages.forEach(img => { finalUrls[img.type] = img.preview; });
+        }
+
+        setScanProgress({ percentage: 100, message: 'Scan complete!' });
+        setScanResult(result);
+        setIsScanning(false);
+
+        if (onComplete) {
+          onComplete(result, finalUrls);
+        }
+      } else {
+        throw new Error(data.error || 'AI scan failed');
+      }
 
     } catch (err) {
       console.error('Scan error:', err);
-      setError('AI scan failed. Please try again.');
+      setError(err instanceof Error ? err.message : 'AI scan failed. Please try again.');
       setIsScanning(false);
     }
   };
@@ -274,7 +309,7 @@ export default function EnhancedAIScanner({
   const fetchScanResult = async () => {
     try {
       const supabase = createClient();
-      
+
       const { data, error } = await supabase
         .from('ai_scans')
         .select('*')
@@ -327,7 +362,7 @@ export default function EnhancedAIScanner({
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="bg-white rounded-lg shadow-lg p-6">
-        <h2 className="text-2xl font-bold mb-6">AI Book Scanner</h2>
+        <h2 className="text-2xl font-bold mb-6 text-gray-900">AI Book Scanner</h2>
 
         {/* Error Display */}
         {error && (
@@ -381,13 +416,13 @@ export default function EnhancedAIScanner({
         {/* Captured Images Preview */}
         {!showCamera && capturedImages.length > 0 && !isScanning && !scanResult && (
           <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-4">Captured Images</h3>
+            <h3 className="text-lg font-semibold mb-4 text-gray-900">Captured Images</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {imageSequence.map(type => {
                 const image = capturedImages.find(img => img.type === type);
                 return (
                   <div key={type} className="border rounded-lg p-2">
-                    <div className="text-sm font-medium mb-2">{getImageTypeLabel(type)}</div>
+                    <div className="text-sm font-medium mb-2 text-gray-700">{getImageTypeLabel(type)}</div>
                     {image ? (
                       <>
                         <img
@@ -417,11 +452,10 @@ export default function EnhancedAIScanner({
               <button
                 onClick={startAIScan}
                 disabled={!allImagesCaptured}
-                className={`flex-1 px-6 py-3 rounded-lg font-medium ${
-                  allImagesCaptured
-                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                }`}
+                className={`flex-1 px-6 py-3 rounded-lg font-medium ${allImagesCaptured
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
               >
                 Start AI Scan
               </button>
@@ -440,11 +474,11 @@ export default function EnhancedAIScanner({
         {/* Progress Bar (Requirement 2.11) */}
         {isScanning && (
           <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-4">Scanning in Progress</h3>
+            <h3 className="text-lg font-semibold mb-4 text-gray-900">Scanning in Progress</h3>
             <div className="mb-2">
               <div className="flex justify-between text-sm mb-1">
-                <span>{scanProgress.message}</span>
-                <span>{scanProgress.percentage}%</span>
+                <span className="text-gray-700">{scanProgress.message}</span>
+                <span className="text-gray-700">{scanProgress.percentage}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-4">
                 <div
@@ -462,11 +496,11 @@ export default function EnhancedAIScanner({
         {/* Scan Results */}
         {scanResult && (
           <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-4">Scan Complete!</h3>
-            
+            <h3 className="text-lg font-semibold mb-4 text-gray-900">Scan Complete!</h3>
+
             {/* ISBN Detection */}
             <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-              <div className="font-medium mb-2">ISBN Detection</div>
+              <div className="font-medium mb-2 text-gray-900">ISBN Detection</div>
               {scanResult.detected_isbn ? (
                 <div className="text-green-600">✓ ISBN: {scanResult.detected_isbn}</div>
               ) : (
@@ -477,8 +511,8 @@ export default function EnhancedAIScanner({
             {/* Book Metadata */}
             {scanResult.book_metadata && (
               <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-                <div className="font-medium mb-2">Book Information</div>
-                <div className="space-y-1 text-sm">
+                <div className="font-medium mb-2 text-gray-900">Book Information</div>
+                <div className="space-y-1 text-sm text-gray-700">
                   <div><span className="font-medium">Title:</span> {scanResult.book_metadata.title}</div>
                   <div><span className="font-medium">Author:</span> {scanResult.book_metadata.author}</div>
                   {scanResult.book_metadata.publisher && (
@@ -493,8 +527,8 @@ export default function EnhancedAIScanner({
 
             {/* Condition Analysis */}
             <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-              <div className="font-medium mb-2">Condition Analysis</div>
-              <div className="space-y-2 text-sm">
+              <div className="font-medium mb-2 text-gray-900">Condition Analysis</div>
+              <div className="space-y-2 text-sm text-gray-700">
                 <div className="flex justify-between">
                   <span>Overall Score:</span>
                   <span className="font-bold">{scanResult.condition_analysis.overall_score}/5</span>

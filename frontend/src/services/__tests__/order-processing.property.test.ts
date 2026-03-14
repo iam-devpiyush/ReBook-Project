@@ -97,7 +97,8 @@ describe('Active Listing Uniqueness (Property 41.2)', () => {
       fc.property(inactiveListing, fc.uuid(), (listing, buyerId) => {
         const result = reserveListing(listing, buyerId);
         expect(result.success).toBe(false);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -108,7 +109,8 @@ describe('Active Listing Uniqueness (Property 41.2)', () => {
         const result = reserveListing(listing, buyerId);
         expect(result.success).toBe(true);
         expect(result.updatedListing?.status).toBe('sold');
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -120,7 +122,8 @@ describe('Active Listing Uniqueness (Property 41.2)', () => {
         if (result.success) {
           expect(result.updatedListing!.status).toBe('sold');
         }
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 });
@@ -142,7 +145,8 @@ describe('Order Creation Atomicity (Property 41.3)', () => {
         // Second buyer tries on the now-sold listing
         const second = reserveListing(first.updatedListing!, buyer2);
         expect(second.success).toBe(false);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -155,7 +159,8 @@ describe('Order Creation Atomicity (Property 41.3)', () => {
         // At most one succeeds
         const successCount = [first, second].filter((r) => r.success).length;
         expect(successCount).toBeLessThanOrEqual(1);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 });
@@ -189,7 +194,8 @@ describe('Concurrent Order Prevention (Property 41.4)', () => {
 
           expect(successCount).toBeLessThanOrEqual(1);
         }
-      )
+      ),
+      { numRuns: 1000 }
     );
   });
 
@@ -199,7 +205,8 @@ describe('Concurrent Order Prevention (Property 41.4)', () => {
         const result = reserveListing(listing, listing.sellerId);
         expect(result.success).toBe(false);
         expect(result.reason).toContain('Seller');
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 });
@@ -222,7 +229,8 @@ describe('Order Status with Payment (Property 41.6)', () => {
       fc.property(pendingOrderArb, (order) => {
         const updated = applyPaymentConfirmation(order);
         expect(updated.status).toBe('paid');
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -237,7 +245,8 @@ describe('Order Status with Payment (Property 41.6)', () => {
       fc.property(nonPendingArb, (order) => {
         const updated = applyPaymentConfirmation(order);
         expect(updated.status).toBe(order.status); // unchanged
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 });
@@ -260,7 +269,8 @@ describe('Shipping Label Generation (Property 41.7)', () => {
         const updated = applyShipping(order, trackingId);
         expect(updated.status).toBe('shipped');
         expect(updated.trackingId).toBe(trackingId);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -276,7 +286,8 @@ describe('Shipping Label Generation (Property 41.7)', () => {
         const updated = applyShipping(order, trackingId);
         expect(updated.status).toBe(order.status); // unchanged
         expect(updated.trackingId).toBeUndefined();
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -288,7 +299,8 @@ describe('Shipping Label Generation (Property 41.7)', () => {
           expect(updated.trackingId).toBeDefined();
           expect(updated.trackingId!.length).toBeGreaterThan(0);
         }
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 });

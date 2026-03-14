@@ -1,87 +1,79 @@
-/**
- * API Route: /api/admin/listings/[id]/approve
- * 
- * PUT: Approve a listing
- * 
- * Requirements: 3.4, 3.5, 3.6
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
-import { processAdminApproval } from '@/services/admin-approval.service';
+import { createClient } from '@supabase/supabase-js';
 
-/**
- * PUT /api/admin/listings/[id]/approve
- * 
- * Approve a listing and make it active
- * - Requires admin authentication
- * - Calls processAdminApproval with "approve" action
- * - Updates listing status to "active"
- * - Sets approved_at and approved_by fields
- * - Adds listing to Meilisearch index
- * - Publishes Supabase Realtime notification to seller
- * - Returns updated listing
- */
+function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    // Verify admin authentication
     const authResult = await requireAdmin(request);
-    
-    if (!authResult.success) {
-      return authResult.response;
-    }
-    
+    if (!authResult.success) return authResult.response;
+
     const { user } = authResult;
     const listingId = params.id;
-    
-    // Validate listing ID
+
     if (!listingId) {
+      return NextResponse.json({ error: 'Listing ID is required' }, { status: 400 });
+    }
+
+    const supabase = createAdminClient() as any;
+
+    // Verify listing exists and is pending
+    const { data: listing, error: fetchError } = await supabase
+      .from('listings')
+      .select('id, status')
+      .eq('id', listingId)
+      .single();
+
+    if (fetchError || !listing) {
+      return NextResponse.json({ error: 'Listing not found' }, { status: 404 });
+    }
+
+    if (listing.status !== 'pending_approval' && listing.status !== 'rescan_required') {
       return NextResponse.json(
-        { error: 'Listing ID is required' },
+        { error: `Listing status must be pending_approval or rescan_required, current: ${listing.status}` },
         { status: 400 }
       );
     }
-    
-    // Process admin approval
-    const result = await processAdminApproval({
-      listingId,
-      adminId: user.id,
-      action: 'approve',
-    });
-    
-    if (!result.success) {
-      // Determine appropriate status code based on error
-      let statusCode = 500;
-      
-      if (result.error?.includes('not found')) {
-        statusCode = 404;
-      } else if (result.error?.includes('status must be')) {
-        statusCode = 400;
-      } else if (result.error?.includes('permissions')) {
-        statusCode = 403;
-      }
-      
-      return NextResponse.json(
-        { error: result.error },
-        { status: statusCode }
-      );
+
+    // Approve: set status to active
+    const { data: updated, error: updateError } = await supabase
+      .from('listings')
+      .update({
+        status: 'active',
+        approved_at: new Date().toISOString(),
+        approved_by: user.id,
+        rejection_reason: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', listingId)
+      .select('*, book:books(*), seller:users!seller_id(id, name, email)')
+      .single();
+
+    if (updateError || !updated) {
+      console.error('Failed to approve listing:', updateError);
+      return NextResponse.json({ error: 'Failed to approve listing' }, { status: 500 });
     }
-    
-    return NextResponse.json({
-      success: true,
-      data: result.listing,
-      message: 'Listing approved successfully',
-    });
-    
+
+    // Log moderation action (non-fatal)
+    await supabase.from('moderation_logs').insert({
+      admin_id: user.id,
+      action: 'approve_listing',
+      target_type: 'listing',
+      target_id: listingId,
+    }).catch((e: unknown) => console.error('Moderation log failed:', e));
+
+    return NextResponse.json({ success: true, data: updated, message: 'Listing approved successfully' });
   } catch (error) {
     console.error('Error in PUT /api/admin/listings/[id]/approve:', error);
-    
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

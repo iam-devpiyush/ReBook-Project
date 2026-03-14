@@ -8,7 +8,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
+
+function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 /**
  * GET /api/admin/users
@@ -30,11 +37,11 @@ export async function GET(request: NextRequest) {
   try {
     // Verify admin authentication
     const authResult = await requireAdmin(request);
-    
+
     if (!authResult.success) {
       return authResult.response;
     }
-    
+
     // Parse query parameters
     const { searchParams } = new URL(request.url);
     const role = searchParams.get('role');
@@ -45,7 +52,7 @@ export async function GET(request: NextRequest) {
       parseInt(searchParams.get('pageSize') || '20', 10),
       100 // Max 100 items per page
     );
-    
+
     // Validate pagination parameters
     if (page < 1 || pageSize < 1) {
       return NextResponse.json(
@@ -53,12 +60,12 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
-    
+
     const offset = (page - 1) * pageSize;
-    
+
     // Create Supabase client
-    const supabase = createServerClient();
-    
+    const supabase = createAdminClient();
+
     // Build query
     let query = supabase
       .from('users')
@@ -84,38 +91,38 @@ export async function GET(request: NextRequest) {
         created_at,
         updated_at
       `, { count: 'exact' });
-    
+
     // Apply role filter if provided
     if (role) {
       const validRoles = ['buyer', 'seller', 'admin'];
-      
+
       if (!validRoles.includes(role)) {
         return NextResponse.json(
-          { 
-            error: 'Invalid role', 
-            validRoles 
+          {
+            error: 'Invalid role',
+            validRoles
           },
           { status: 400 }
         );
       }
-      
+
       query = query.eq('role', role);
     }
-    
+
     // Apply status filter if provided
     if (status) {
       const validStatuses = ['active', 'suspended', 'inactive'];
-      
+
       if (!validStatuses.includes(status)) {
         return NextResponse.json(
-          { 
-            error: 'Invalid status', 
-            validStatuses 
+          {
+            error: 'Invalid status',
+            validStatuses
           },
           { status: 400 }
         );
       }
-      
+
       if (status === 'active') {
         // Active users: is_active = true AND (suspended_until is null OR suspended_until < now)
         query = query
@@ -129,19 +136,19 @@ export async function GET(request: NextRequest) {
         query = query.eq('is_active', false);
       }
     }
-    
+
     // Apply search filter if provided
     if (search && search.trim()) {
       const searchTerm = search.trim();
       // Search in name or email using ilike for case-insensitive search
       query = query.or(`name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`);
     }
-    
+
     // Apply pagination and ordering
     const { data: users, error: usersError, count } = await query
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
-    
+
     if (usersError) {
       console.error('Error fetching users:', usersError);
       return NextResponse.json(
@@ -149,16 +156,16 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     }
-    
+
     // Calculate pagination metadata
     const totalPages = count ? Math.ceil(count / pageSize) : 0;
     const hasNextPage = page < totalPages;
     const hasPreviousPage = page > 1;
-    
+
     // Enhance user data with computed status
     const enhancedUsers = (users || []).map((user: any) => {
       let computedStatus = 'active';
-      
+
       if (!user.is_active) {
         computedStatus = 'inactive';
       } else if (user.suspended_until) {
@@ -168,13 +175,13 @@ export async function GET(request: NextRequest) {
           computedStatus = 'suspended';
         }
       }
-      
+
       return {
         ...user,
         status: computedStatus,
       };
     });
-    
+
     return NextResponse.json({
       success: true,
       data: enhancedUsers,
@@ -187,10 +194,10 @@ export async function GET(request: NextRequest) {
         hasPreviousPage,
       },
     });
-    
+
   } catch (error) {
     console.error('Error in GET /api/admin/users:', error);
-    
+
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

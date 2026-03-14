@@ -8,7 +8,15 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
+import { ADMIN_LISTING_PROJECTION } from '@/lib/supabase/projections';
+
+function createAdminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 /**
  * GET /api/admin/listings
@@ -28,11 +36,11 @@ export async function GET(request: NextRequest) {
   try {
     // Verify admin authentication
     const authResult = await requireAdmin(request);
-    
+
     if (!authResult.success) {
       return authResult.response;
     }
-    
+
     // Parse query parameters
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
@@ -41,7 +49,7 @@ export async function GET(request: NextRequest) {
       parseInt(searchParams.get('pageSize') || '20', 10),
       100 // Max 100 items per page
     );
-    
+
     // Validate pagination parameters
     if (page < 1 || pageSize < 1) {
       return NextResponse.json(
@@ -49,22 +57,17 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
-    
+
     const offset = (page - 1) * pageSize;
-    
+
     // Create Supabase client
-    const supabase = createServerClient();
-    
-    // Build query
+    const supabase = createAdminClient();
+
+    // Build query — use projection to fetch only required fields (Requirement 22.1)
     let query = supabase
       .from('listings')
-      .select(`
-        *,
-        book:books(*),
-        seller:users!seller_id(id, name, email, profile_picture, rating),
-        approved_by_user:users!approved_by(id, name, email)
-      `, { count: 'exact' });
-    
+      .select(ADMIN_LISTING_PROJECTION, { count: 'exact' });
+
     // Apply status filter if provided
     if (status) {
       const validStatuses = [
@@ -75,25 +78,25 @@ export async function GET(request: NextRequest) {
         'rescan_required',
         'inactive'
       ];
-      
+
       if (!validStatuses.includes(status)) {
         return NextResponse.json(
-          { 
-            error: 'Invalid status', 
-            validStatuses 
+          {
+            error: 'Invalid status',
+            validStatuses
           },
           { status: 400 }
         );
       }
-      
+
       query = query.eq('status', status);
     }
-    
+
     // Apply pagination and ordering
     const { data: listings, error: listingsError, count } = await query
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
-    
+
     if (listingsError) {
       console.error('Error fetching listings:', listingsError);
       return NextResponse.json(
@@ -101,12 +104,12 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     }
-    
+
     // Calculate pagination metadata
     const totalPages = count ? Math.ceil(count / pageSize) : 0;
     const hasNextPage = page < totalPages;
     const hasPreviousPage = page > 1;
-    
+
     return NextResponse.json({
       success: true,
       data: listings || [],
@@ -119,10 +122,10 @@ export async function GET(request: NextRequest) {
         hasPreviousPage,
       },
     });
-    
+
   } catch (error) {
     console.error('Error in GET /api/admin/listings:', error);
-    
+
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

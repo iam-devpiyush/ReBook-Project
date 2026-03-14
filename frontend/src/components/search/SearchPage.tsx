@@ -1,29 +1,21 @@
 'use client';
 
-/**
- * SearchPage Component
- *
- * Full search and discovery page integrating SearchBar, FilterPanel,
- * sort dropdown, results grid, and pagination.
- *
- * Requirements: 5.1-5.9
- */
-
 import { useState, useCallback, useEffect } from 'react';
-import SearchBar from './SearchBar';
-import FilterPanel, { SearchFilters } from './FilterPanel';
+import Link from 'next/link';
 import ListingCard from './ListingCard';
 import type { ListingDocument, SortBy } from '@/services/search.service';
 
 interface SearchResult {
   data: ListingDocument[];
-  pagination: {
-    page: number;
-    page_size: number;
-    total_hits: number;
-    total_pages: number;
-  };
+  pagination: { page: number; page_size: number; total_hits: number; total_pages: number };
   processing_time_ms: number;
+}
+
+interface SearchFilters {
+  conditions: number[];
+  category_id?: string;
+  price_min?: number;
+  price_max?: number;
 }
 
 const SORT_OPTIONS: { value: SortBy; label: string }[] = [
@@ -34,165 +26,215 @@ const SORT_OPTIONS: { value: SortBy; label: string }[] = [
   { value: 'date_desc', label: 'Newest First' },
 ];
 
+const CONDITIONS = [
+  { score: 5, label: 'Like New' },
+  { score: 4, label: 'Very Good' },
+  { score: 3, label: 'Good' },
+  { score: 2, label: 'Acceptable' },
+  { score: 1, label: 'Poor' },
+];
+
+const CATEGORIES = [
+  { value: '', label: 'All Categories' },
+  { value: 'fiction', label: 'Fiction' },
+  { value: 'non-fiction', label: 'Non-Fiction' },
+  { value: 'textbook', label: 'Textbook' },
+  { value: 'science', label: 'Science' },
+  { value: 'technology', label: 'Technology' },
+  { value: 'history', label: 'History' },
+  { value: 'biography', label: 'Biography' },
+  { value: 'children', label: 'Children' },
+  { value: 'other', label: 'Other' },
+];
+
 interface SearchPageProps {
+  /** When provided, renders as an embedded section (no full-page chrome) */
+  embedded?: boolean;
+  /** Max number of results to show in embedded mode */
+  limit?: number;
   onListingClick?: (listing: ListingDocument) => void;
 }
 
-export default function SearchPage({ onListingClick }: SearchPageProps) {
+export default function SearchPage({ embedded = false, limit, onListingClick }: SearchPageProps) {
   const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState<SearchFilters>({});
-  const [sortBy, setSortBy] = useState<SortBy>('relevance');
+  const [inputValue, setInputValue] = useState('');
+  const [filters, setFilters] = useState<SearchFilters>({ conditions: [] });
+  const [sortBy, setSortBy] = useState<SortBy>('date_desc');
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 2000]);
 
-  const buildUrl = useCallback(
-    (q: string, f: SearchFilters, sort: SortBy, p: number) => {
-      const params = new URLSearchParams();
-      if (q) params.set('q', q);
-      if (f.category_id) params.set('category_id', f.category_id);
-      if (f.condition_min !== undefined) params.set('condition_min', String(f.condition_min));
-      if (f.price_min !== undefined) params.set('price_min', String(f.price_min));
-      if (f.price_max !== undefined) params.set('price_max', String(f.price_max));
-      if (f.state) params.set('state', f.state);
-      params.set('sort_by', sort);
-      params.set('page', String(p));
-      params.set('page_size', '20');
-      return `/api/search?${params.toString()}`;
-    },
-    []
-  );
+  const buildUrl = useCallback((q: string, f: SearchFilters, sort: SortBy, p: number) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (f.category_id) params.set('category_id', f.category_id);
+    if (f.conditions.length > 0) params.set('condition_min', String(Math.min(...f.conditions)));
+    if (f.price_min !== undefined) params.set('price_min', String(f.price_min));
+    if (f.price_max !== undefined) params.set('price_max', String(f.price_max));
+    params.set('sort_by', sort);
+    params.set('page', String(p));
+    params.set('page_size', String(limit ?? 20));
+    return `/api/search?${params.toString()}`;
+  }, [limit]);
 
-  const doSearch = useCallback(
-    async (q: string, f: SearchFilters, sort: SortBy, p: number) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(buildUrl(q, f, sort, p));
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Search failed');
-        }
-        const data = await res.json();
-        setResult(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Search failed');
-      } finally {
-        setLoading(false);
+  const doSearch = useCallback(async (q: string, f: SearchFilters, sort: SortBy, p: number) => {
+    setLoading(true);
+    try {
+      const res = await fetch(buildUrl(q, f, sort, p));
+      if (!res.ok) {
+        setResult({ data: [], pagination: { page: p, page_size: limit ?? 20, total_hits: 0, total_pages: 0 }, processing_time_ms: 0 });
+        return;
       }
-    },
-    [buildUrl]
-  );
+      setResult(await res.json());
+    } catch {
+      setResult({ data: [], pagination: { page: p, page_size: limit ?? 20, total_hits: 0, total_pages: 0 }, processing_time_ms: 0 });
+    } finally {
+      setLoading(false);
+    }
+  }, [buildUrl, limit]);
 
-  // Run search whenever query/filters/sort/page change
-  useEffect(() => {
-    doSearch(query, filters, sortBy, page);
-  }, [query, filters, sortBy, page, doSearch]);
+  useEffect(() => { doSearch(query, filters, sortBy, page); }, [query, filters, sortBy, page, doSearch]);
 
-  const handleSearch = (q: string) => {
-    setQuery(q);
+  const toggleCondition = (score: number) => {
+    setFilters(f => ({
+      ...f,
+      conditions: f.conditions.includes(score) ? f.conditions.filter(c => c !== score) : [...f.conditions, score],
+    }));
     setPage(1);
   };
 
-  const handleFiltersChange = (f: SearchFilters) => {
-    setFilters(f);
-    setPage(1);
-  };
-
-  const handleSortChange = (sort: SortBy) => {
-    setSortBy(sort);
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setQuery(inputValue);
     setPage(1);
   };
 
   const totalResults = result?.pagination.total_hits ?? 0;
   const totalPages = result?.pagination.total_pages ?? 0;
+  const listings = result?.data ?? [];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Search header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-6xl mx-auto">
-          <SearchBar
-            initialQuery={query}
-            onSearch={handleSearch}
-            autoFocus
-          />
+    <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>
+      {/* ── Page header ── */}
+      <div className={embedded ? 'mb-5' : 'bg-white border-b border-gray-200 px-4 py-5 shadow-sm'}>
+        <div className={embedded ? '' : 'max-w-7xl mx-auto'}>
+          {/* Title row */}
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Browse Books</h1>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {loading ? 'Loading...' : `${totalResults.toLocaleString()} book${totalResults !== 1 ? 's' : ''} available`}
+              </p>
+            </div>
+            {!embedded && (
+              <Link
+                href="/search"
+                className="hidden sm:inline-flex items-center gap-1.5 text-sm font-medium text-green-600 hover:text-green-700"
+              >
+                Browse Full Book Catalog →
+              </Link>
+            )}
+            {embedded && (
+              <Link
+                href="/search"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-green-600 hover:text-green-700"
+              >
+                Browse Full Book Catalog →
+              </Link>
+            )}
+          </div>
+
+          {/* Search + sort row */}
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <div className="flex-1 relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="search"
+                value={inputValue}
+                onChange={e => setInputValue(e.target.value)}
+                placeholder="Search by title, author, or ISBN..."
+                className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              />
+            </div>
+            <select
+              value={sortBy}
+              onChange={e => { setSortBy(e.target.value as SortBy); setPage(1); }}
+              className="border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+            >
+              {SORT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+            </select>
+            <button type="submit" className="px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-xl hover:bg-green-700 transition-colors">
+              Search
+            </button>
+          </form>
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 py-6">
+      <div className={embedded ? '' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6'}>
         <div className="flex gap-6">
-          {/* Filter sidebar — desktop */}
-          <aside className="hidden md:block w-56 flex-shrink-0">
-            <FilterPanel filters={filters} onChange={handleFiltersChange} />
-          </aside>
-
-          {/* Main content */}
-          <div className="flex-1 min-w-0">
-            {/* Toolbar */}
-            <div className="flex items-center justify-between mb-4 gap-3">
-              {/* Mobile filter toggle */}
-              <button
-                onClick={() => setFiltersOpen((o) => !o)}
-                aria-label="Toggle filters"
-                className="md:hidden flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
-                </svg>
-                Filters
-              </button>
-
-              {/* Result count */}
-              <p className="text-sm text-gray-500 flex-1">
-                {loading ? (
-                  'Searching...'
-                ) : error ? (
-                  <span className="text-red-500">{error}</span>
-                ) : (
-                  <>
-                    {totalResults.toLocaleString()} result{totalResults !== 1 ? 's' : ''}
-                    {query && (
-                      <> for &ldquo;<span className="font-medium text-gray-800">{query}</span>&rdquo;</>
-                    )}
-                    {result?.processing_time_ms !== undefined && (
-                      <span className="text-gray-400"> ({result.processing_time_ms}ms)</span>
-                    )}
-                  </>
-                )}
-              </p>
-
-              {/* Sort dropdown */}
-              <div className="flex items-center gap-2">
-                <label htmlFor="sort-select" className="text-sm text-gray-600 whitespace-nowrap hidden sm:block">
-                  Sort by
-                </label>
-                <select
-                  id="sort-select"
-                  value={sortBy}
-                  onChange={(e) => handleSortChange(e.target.value as SortBy)}
-                  aria-label="Sort results"
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                >
-                  {SORT_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+          {/* ── Sidebar filters ── */}
+          <aside className="hidden md:block w-56 flex-shrink-0 space-y-4">
+            {/* Condition */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Condition</h3>
+              <div className="space-y-2">
+                {CONDITIONS.map(c => (
+                  <label key={c.score} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filters.conditions.includes(c.score)}
+                      onChange={() => toggleCondition(c.score)}
+                      className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                    />
+                    <span className="text-sm text-gray-700">{c.label}</span>
+                  </label>
+                ))}
               </div>
             </div>
 
-            {/* Mobile filter panel */}
-            {filtersOpen && (
-              <div className="md:hidden mb-4 bg-white rounded-xl border border-gray-200 p-4">
-                <FilterPanel filters={filters} onChange={handleFiltersChange} />
-              </div>
-            )}
+            {/* Category */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Category</h3>
+              <select
+                value={filters.category_id ?? ''}
+                onChange={e => { setFilters(f => ({ ...f, category_id: e.target.value || undefined })); setPage(1); }}
+                className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
 
+            {/* Price Range */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Price Range</h3>
+              <div className="space-y-3">
+                <input
+                  type="range"
+                  min={0}
+                  max={2000}
+                  step={50}
+                  value={priceRange[1]}
+                  onChange={e => {
+                    const val = Number(e.target.value);
+                    setPriceRange([priceRange[0], val]);
+                    setFilters(f => ({ ...f, price_max: val }));
+                    setPage(1);
+                  }}
+                  className="w-full accent-green-600"
+                />
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>₹0</span>
+                  <span>₹{priceRange[1].toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          {/* ── Main content ── */}
+          <div className="flex-1 min-w-0">
             {/* Results grid */}
             {loading ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -207,78 +249,31 @@ export default function SearchPage({ onListingClick }: SearchPageProps) {
                   </div>
                 ))}
               </div>
-            ) : error ? (
-              <div className="text-center py-16">
-                <p className="text-red-500 font-medium">{error}</p>
-                <button
-                  onClick={() => doSearch(query, filters, sortBy, page)}
-                  className="mt-3 text-sm text-blue-600 hover:underline"
-                >
-                  Try again
-                </button>
-              </div>
-            ) : result?.data.length === 0 ? (
-              <div className="text-center py-16 text-gray-500">
+            ) : listings.length === 0 ? (
+              <div className="text-center py-20 text-gray-500">
                 <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
                 </svg>
-                <p className="font-medium text-gray-700">No results found</p>
-                <p className="text-sm mt-1">Try a different search or adjust your filters.</p>
+                <p className="font-medium text-gray-700">No books found</p>
+                <p className="text-sm mt-1">Try adjusting your filters or search terms</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {result?.data.map((listing) => (
-                  <ListingCard
-                    key={listing.id}
-                    listing={listing}
-                    onClick={onListingClick}
-                  />
+                {listings.map(listing => (
+                  <ListingCard key={listing.id} listing={listing} onClick={onListingClick} />
                 ))}
               </div>
             )}
 
-            {/* Pagination */}
-            {!loading && !error && totalPages > 1 && (
+            {/* Pagination (full page only) */}
+            {!embedded && !loading && totalPages > 1 && (
               <div className="flex items-center justify-center gap-2 mt-8">
-                <button
-                  onClick={() => setPage((p) => p - 1)}
-                  disabled={page <= 1}
-                  aria-label="Previous page"
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50 transition-colors"
-                >
-                  Previous
-                </button>
-
-                <div className="flex gap-1">
-                  {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                    const pageNum = Math.max(1, Math.min(page - 2, totalPages - 4)) + i;
-                    return (
-                      <button
-                        key={pageNum}
-                        onClick={() => setPage(pageNum)}
-                        aria-label={`Page ${pageNum}`}
-                        aria-current={pageNum === page ? 'page' : undefined}
-                        className={`w-9 h-9 rounded-lg text-sm font-medium transition-colors ${
-                          pageNum === page
-                            ? 'bg-blue-600 text-white'
-                            : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <button
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= totalPages}
-                  aria-label="Next page"
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50 transition-colors"
-                >
-                  Next
-                </button>
+                <button onClick={() => setPage(p => p - 1)} disabled={page <= 1}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50">Previous</button>
+                <span className="text-sm text-gray-600">Page {page} of {totalPages}</span>
+                <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50">Next</button>
               </div>
             )}
           </div>

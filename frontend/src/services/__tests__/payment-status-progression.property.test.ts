@@ -51,7 +51,8 @@ describe('Payment Status Progression (Property-Based)', () => {
     fc.assert(
       fc.property(validTransitionArb, ([from, to]) => {
         expect(isValidTransition(from, to)).toBe(true);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -59,7 +60,8 @@ describe('Payment Status Progression (Property-Based)', () => {
     fc.assert(
       fc.property(statusArb, (status) => {
         expect(isValidTransition(status, status)).toBe(false);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -70,7 +72,8 @@ describe('Payment Status Progression (Property-Based)', () => {
         for (const terminal of terminalStatuses) {
           expect(isValidTransition(terminal, to)).toBe(false);
         }
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -88,7 +91,8 @@ describe('Payment Status Progression (Property-Based)', () => {
     fc.assert(
       fc.property(fc.constantFrom(...backwardPairs), ([from, to]) => {
         expect(isValidTransition(from, to)).toBe(false);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -96,7 +100,8 @@ describe('Payment Status Progression (Property-Based)', () => {
     fc.assert(
       fc.property(invalidTransitionArb, ([from, to]) => {
         expect(isValidTransition(from, to)).toBe(false);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 

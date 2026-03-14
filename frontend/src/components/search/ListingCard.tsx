@@ -1,47 +1,41 @@
 'use client';
 
-/**
- * ListingCard Component
- *
- * Displays a single listing in the search results grid.
- * Shows book image, title, author, condition badge, price, and location.
- *
- * Requirements: Search results display
- */
-
-import ConditionBadge from '@/components/listings/ConditionBadge';
 import type { ListingDocument } from '@/services/search.service';
 
 interface ListingCardProps {
   listing: ListingDocument;
-  /** Distance in km from user (optional, shown when proximity sort is active) */
   distanceKm?: number;
   onClick?: (listing: ListingDocument) => void;
 }
+
+const CONDITION_LABELS: Record<number, { label: string; color: string }> = {
+  5: { label: 'Like New', color: 'bg-green-100 text-green-700' },
+  4: { label: 'Very Good', color: 'bg-blue-100 text-blue-700' },
+  3: { label: 'Good', color: 'bg-yellow-100 text-yellow-700' },
+  2: { label: 'Acceptable', color: 'bg-orange-100 text-orange-700' },
+  1: { label: 'Poor', color: 'bg-red-100 text-red-700' },
+};
 
 export default function ListingCard({ listing, distanceKm, onClick }: ListingCardProps) {
   const formatPrice = (amount: number) =>
     `₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
-  const handleClick = () => onClick?.(listing);
+  const condition = CONDITION_LABELS[listing.condition_score] ?? { label: `Score ${listing.condition_score}`, color: 'bg-gray-100 text-gray-600' };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onClick?.(listing);
-    }
-  };
+  // Eco: 1 book ≈ 0.033 trees
+  const treesPerBook = (1 / 30).toFixed(3);
+
+  // Estimate original price (listing price is already discounted)
+  const estimatedOriginal = Math.round(listing.final_price * 1.4);
 
   return (
     <article
       role="article"
       aria-label={`${listing.title} by ${listing.author}`}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
+      onClick={() => onClick?.(listing)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(listing); } }}
       tabIndex={onClick ? 0 : undefined}
-      className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden transition-all ${
-        onClick ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''
-      }`}
+      className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden transition-all ${onClick ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
     >
       {/* Book image */}
       <div className="relative aspect-[3/4] bg-gray-100 overflow-hidden">
@@ -63,41 +57,35 @@ export default function ListingCard({ listing, distanceKm, onClick }: ListingCar
 
         {/* Condition badge overlay */}
         <div className="absolute top-2 left-2">
-          <ConditionBadge conditionScore={listing.condition_score} size="sm" showLabel={false} />
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${condition.color}`}>
+            {condition.label}
+          </span>
         </div>
       </div>
 
       {/* Card body */}
       <div className="p-3">
-        {/* Title */}
         <h3 className="font-semibold text-gray-900 text-sm line-clamp-2 leading-snug">
           {listing.title}
         </h3>
-
-        {/* Author */}
         <p className="text-gray-500 text-xs mt-0.5 truncate">{listing.author}</p>
 
-        {/* Price */}
-        <p className="text-blue-700 font-bold text-base mt-2">
-          {formatPrice(listing.final_price)}
-        </p>
+        {/* Price row */}
+        <div className="flex items-baseline gap-1.5 mt-2">
+          <p className="text-green-600 font-bold text-base">
+            {formatPrice(listing.final_price)}
+          </p>
+          <p className="text-gray-400 text-xs line-through">
+            {formatPrice(estimatedOriginal)}
+          </p>
+        </div>
 
-        {/* Location + distance */}
-        <div className="flex items-center gap-1 mt-1.5 text-gray-400 text-xs">
-          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <span className="truncate">
-            {listing.location.city}, {listing.location.state}
-          </span>
+        {/* Eco tag */}
+        <div className="flex items-center gap-1 mt-1.5">
+          <span className="text-xs text-green-600 font-medium">🌱 {treesPerBook} trees</span>
           {distanceKm !== undefined && (
-            <span className="ml-auto flex-shrink-0 text-gray-400">
-              {distanceKm < 1
-                ? `${Math.round(distanceKm * 1000)}m`
-                : `${distanceKm.toFixed(1)}km`}
+            <span className="ml-auto text-xs text-gray-400">
+              {distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`}
             </span>
           )}
         </div>

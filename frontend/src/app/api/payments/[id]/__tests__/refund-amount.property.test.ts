@@ -74,7 +74,8 @@ describe('Refund Amount Validity', () => {
           const result = validateRefundAmount(amount, originalAmount);
           expect(result.valid).toBe(false);
         }
-      )
+      ),
+      { numRuns: 1000 }
     );
   });
 
@@ -92,7 +93,8 @@ describe('Refund Amount Validity', () => {
           const result = validateRefundAmount(amount, originalAmount);
           expect(result.valid).toBe(false);
         }
-      )
+      ),
+      { numRuns: 1000 }
     );
   });
 
@@ -114,7 +116,8 @@ describe('Refund Amount Validity', () => {
           // Partial means strictly less than full
           expect(amount).toBeLessThan(originalAmount);
         }
-      )
+      ),
+      { numRuns: 1000 }
     );
   });
 
@@ -127,7 +130,8 @@ describe('Refund Amount Validity', () => {
       fc.property(originalAmountArb, (originalAmount) => {
         const result = validateRefundAmount(0, originalAmount);
         expect(result.valid).toBe(false);
-      })
+      }),
+      { numRuns: 1000 }
     );
   });
 
@@ -144,7 +148,8 @@ describe('Refund Amount Validity', () => {
           const result = validateRefundAmount(amount, originalAmount);
           expect(result.valid).toBe(false);
         }
-      )
+      ),
+      { numRuns: 1000 }
     );
   });
 });

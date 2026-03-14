@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
 import { createServerClient } from '@/lib/supabase/server';
 import { createPaymentIntent } from '@/services/payment.service';
+import { sanitizePaymentRecord, assertNoCardData } from '@/lib/security/encryption';
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,6 +20,9 @@ export async function POST(request: NextRequest) {
     const { user } = authResult;
     const body = await request.json();
     const { order_id } = body;
+
+    // Guard: never accept raw card data (Requirement 23.4)
+    assertNoCardData(body);
 
     if (!order_id) {
       return NextResponse.json({ error: 'order_id is required' }, { status: 400 });
@@ -51,16 +55,18 @@ export async function POST(request: NextRequest) {
       .eq('id', order_id);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any).from('payments').insert({
-      order_id,
-      payment_intent_id: result.paymentIntentId,
-      amount: order.total_amount,
-      currency,
-      status: 'completed',
-      gateway: 'dummy',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
+    await (supabase as any).from('payments').insert(
+      sanitizePaymentRecord({
+        order_id,
+        payment_intent_id: result.paymentIntentId,
+        amount: order.total_amount,
+        currency,
+        status: 'completed',
+        gateway: 'dummy',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+    );
 
     return NextResponse.json({
       success: true,

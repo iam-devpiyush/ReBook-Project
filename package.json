@@ -19,7 +19,11 @@
     "verify:storage": "ts-node scripts/verify-storage-setup.ts",
     "verify:meilisearch": "ts-node scripts/verify-meilisearch-setup.ts",
     "verify:meilisearch:config": "ts-node scripts/verify-meilisearch-config.ts",
-    "verify:foundation": "ts-node scripts/verify-foundation-setup.ts"
+    "verify:foundation": "ts-node scripts/verify-foundation-setup.ts",
+    "seed:categories": "ts-node --project scripts/tsconfig.json scripts/apply-categories-seed.ts",
+    "seed:demo": "npx ts-node --project scripts/tsconfig.json scripts/seed-demo-data.ts",
+    "seed:images": "npx ts-node --project scripts/tsconfig.json scripts/upload-demo-images.ts",
+    "sync:search": "npx ts-node --project scripts/tsconfig.json scripts/sync-meilisearch.ts"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.99.1",

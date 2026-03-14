@@ -10,12 +10,16 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signInWithGoogle, signInWithApple, signInWithMicrosoft } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/client';
 
 export default function SignInPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showEmailForm, setShowEmailForm] = useState(false);
 
   // Get redirect URL from query params or default to dashboard
   const redirectTo = searchParams.get('redirect') || '/dashboard';
@@ -28,9 +32,23 @@ export default function SignInPage() {
       setLoading(provider);
       setError(null);
       await signInFn(redirectTo);
-      // Redirect happens automatically via OAuth flow
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
+      setLoading(null);
+    }
+  };
+
+  const handleEmailSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading('email');
+      setError(null);
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInError) throw new Error(signInError.message);
+      router.push(redirectTo);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign in failed');
       setLoading(null);
     }
   };
@@ -144,6 +162,81 @@ export default function SignInPage() {
             )}
             <span>Continue with Microsoft</span>
           </button>
+
+          {/* Divider */}
+          <div className="relative my-2">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-3 bg-white text-gray-400">or</span>
+            </div>
+          </div>
+
+          {/* Email / Password toggle */}
+          {!showEmailForm ? (
+            <button
+              onClick={() => setShowEmailForm(true)}
+              disabled={loading !== null}
+              className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg shadow-sm bg-white text-gray-700 font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <span>Continue with Email</span>
+            </button>
+          ) : (
+            <form onSubmit={handleEmailSignIn} className="space-y-3">
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                  Email
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                  Password
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading !== null}
+                className="w-full flex items-center justify-center px-4 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {loading === 'email' ? (
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                ) : (
+                  'Sign In'
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowEmailForm(false)}
+                className="w-full text-sm text-gray-500 hover:text-gray-700 text-center"
+              >
+                ← Back to other options
+              </button>
+            </form>
+          )}
         </div>
 
         {/* Footer */}

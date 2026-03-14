@@ -1,18 +1,14 @@
 'use client';
 
-/**
- * BookDetailPage Component
- *
- * Displays full listing details: image gallery, condition, pricing breakdown,
- * seller info (no full address), and action buttons.
- *
- * Requirements: Listing detail view
- */
-
 import { useState, useEffect } from 'react';
-import ConditionBadge from '@/components/listings/ConditionBadge';
-import PricingBreakdownDisplay from '@/components/listings/PricingBreakdownDisplay';
 import type { ListingWithBook } from '@/types/listing';
+import { useCart } from '@/lib/cart/CartContext';
+
+interface EcoImpact {
+  trees_saved: number;
+  water_saved_liters: number;
+  co2_reduced_kg: number;
+}
 
 interface BookDetailPageProps {
   listingId: string;
@@ -20,49 +16,65 @@ interface BookDetailPageProps {
   onAddToWishlist?: (listing: ListingWithBook) => void;
 }
 
-export default function BookDetailPage({
-  listingId,
-  onPlaceOrder,
-  onAddToWishlist,
-}: BookDetailPageProps) {
+const CONDITION_LABELS: Record<number, { label: string; color: string }> = {
+  5: { label: 'Like New', color: 'bg-green-100 text-green-700' },
+  4: { label: 'Very Good', color: 'bg-blue-100 text-blue-700' },
+  3: { label: 'Good', color: 'bg-yellow-100 text-yellow-700' },
+  2: { label: 'Acceptable', color: 'bg-orange-100 text-orange-700' },
+  1: { label: 'Poor', color: 'bg-red-100 text-red-700' },
+};
+
+export default function BookDetailPage({ listingId, onPlaceOrder, onAddToWishlist }: BookDetailPageProps) {
+  const { addItem, isInCart } = useCart();
   const [listing, setListing] = useState<ListingWithBook | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeImage, setActiveImage] = useState(0);
   const [wishlistAdded, setWishlistAdded] = useState(false);
+  const [ordering, setOrdering] = useState(false);
+  const [orderSuccess, setOrderSuccess] = useState<EcoImpact | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchListing = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/listings/${listingId}`);
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Listing not found');
-        }
+    setLoading(true);
+    setError(null);
+    fetch(`/api/listings/${listingId}`)
+      .then(async res => {
         const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Listing not found');
         setListing(data.data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load listing');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchListing();
+      })
+      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load listing'))
+      .finally(() => setLoading(false));
   }, [listingId]);
 
-  const handleAddToWishlist = () => {
+  const handlePlaceOrder = async () => {
     if (!listing) return;
-    setWishlistAdded(true);
-    onAddToWishlist?.(listing);
+    setOrdering(true);
+    setOrderError(null);
+    try {
+      const res = await fetch('/api/orders/instant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listing_id: listing.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to place order');
+      setOrderSuccess(data.data.eco_impact);
+      setListing(prev => prev ? { ...prev, status: 'sold' } : prev);
+      onPlaceOrder?.(listing);
+    } catch (err) {
+      setOrderError(err instanceof Error ? err.message : 'Failed to place order');
+    } finally {
+      setOrdering(false);
+    }
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
-        <span className="ml-3 text-gray-500">Loading listing...</span>
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600" />
+        <span className="ml-3 text-gray-500">Loading...</span>
       </div>
     );
   }
@@ -75,21 +87,53 @@ export default function BookDetailPage({
     );
   }
 
+  if (!listing.book) {
+    return (
+      <div className="max-w-lg mx-auto mt-16 text-center">
+        <p className="text-red-600 font-medium">Book data unavailable for this listing.</p>
+      </div>
+    );
+  }
+
   const images = listing.images ?? [];
+  const condition = CONDITION_LABELS[listing.condition_score] ?? { label: `Score ${listing.condition_score}`, color: 'bg-gray-100 text-gray-600' };
+  const treesPerBook = (1 / 30).toFixed(3);
+  const estimatedOriginal = Math.round(listing.final_price * 1.4);
+  const savePct = Math.round((1 - listing.final_price / estimatedOriginal) * 100);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
+      {/* Order success banner */}
+      {orderSuccess && (
+        <div className="mb-6 bg-green-50 border border-green-200 rounded-2xl p-5">
+          <h2 className="text-lg font-bold text-green-800 mb-1">Order placed — book is yours!</h2>
+          <p className="text-sm text-green-700 mb-3">Thanks for buying second-hand. Here's your environmental impact:</p>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-white rounded-xl p-3 border border-green-100">
+              <span className="text-2xl">🌳</span>
+              <p className="text-lg font-bold text-green-600 mt-1">{orderSuccess.trees_saved.toFixed(3)}</p>
+              <p className="text-xs text-gray-500">Trees saved</p>
+            </div>
+            <div className="bg-white rounded-xl p-3 border border-green-100">
+              <span className="text-2xl">💧</span>
+              <p className="text-lg font-bold text-blue-600 mt-1">{orderSuccess.water_saved_liters}L</p>
+              <p className="text-xs text-gray-500">Water saved</p>
+            </div>
+            <div className="bg-white rounded-xl p-3 border border-green-100">
+              <span className="text-2xl">🍃</span>
+              <p className="text-lg font-bold text-emerald-600 mt-1">{orderSuccess.co2_reduced_kg}kg</p>
+              <p className="text-xs text-gray-500">CO₂ reduced</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Image gallery */}
+        {/* Image */}
         <div>
-          {/* Main image */}
-          <div className="aspect-[3/4] bg-gray-100 rounded-xl overflow-hidden border border-gray-200">
+          <div className="aspect-[3/4] bg-gray-100 rounded-2xl overflow-hidden border border-gray-200">
             {images[activeImage] ? (
-              <img
-                src={images[activeImage]}
-                alt={`${listing.book.title} — image ${activeImage + 1}`}
-                className="w-full h-full object-contain"
-              />
+              <img src={images[activeImage]} alt={listing.book.title} className="w-full h-full object-contain" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-300">
                 <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -99,19 +143,11 @@ export default function BookDetailPage({
               </div>
             )}
           </div>
-
-          {/* Thumbnails */}
           {images.length > 1 && (
             <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
               {images.map((img, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActiveImage(i)}
-                  aria-label={`View image ${i + 1}`}
-                  className={`flex-shrink-0 w-16 h-20 rounded-lg overflow-hidden border-2 transition-colors ${
-                    i === activeImage ? 'border-blue-500' : 'border-gray-200 hover:border-gray-400'
-                  }`}
-                >
+                <button key={i} onClick={() => setActiveImage(i)}
+                  className={`flex-shrink-0 w-16 h-20 rounded-lg overflow-hidden border-2 transition-colors ${i === activeImage ? 'border-green-500' : 'border-gray-200 hover:border-gray-400'}`}>
                   <img src={img} alt="" className="w-full h-full object-cover" />
                 </button>
               ))}
@@ -120,93 +156,116 @@ export default function BookDetailPage({
         </div>
 
         {/* Details */}
-        <div className="space-y-5">
+        <div className="space-y-4">
+          {/* Badges */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${condition.color}`}>
+              {condition.label}
+            </span>
+            {listing.book.publisher && (
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">
+                {listing.book.publisher}
+              </span>
+            )}
+          </div>
+
           {/* Title & author */}
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 leading-tight">
-              {listing.book.title}
-            </h1>
-            <p className="text-gray-600 mt-1">by {listing.book.author}</p>
-            {listing.book.publisher && (
-              <p className="text-gray-400 text-sm mt-0.5">{listing.book.publisher}</p>
-            )}
-            {listing.book.isbn && (
-              <p className="text-gray-400 text-xs mt-0.5">ISBN: {listing.book.isbn}</p>
-            )}
+            <h1 className="text-2xl font-bold text-gray-900 leading-tight">{listing.book.title}</h1>
+            <p className="text-gray-500 mt-1">by {listing.book.author}</p>
           </div>
 
-          {/* Condition */}
-          <div>
-            <p className="text-sm font-medium text-gray-700 mb-1.5">Condition</p>
-            <ConditionBadge conditionScore={listing.condition_score} size="md" />
+          {/* Price */}
+          <div className="flex items-baseline gap-3">
+            <span className="text-3xl font-extrabold text-gray-900">
+              ₹{listing.final_price.toLocaleString('en-IN')}
+            </span>
+            <span className="text-lg text-gray-400 line-through">
+              ₹{estimatedOriginal.toLocaleString('en-IN')}
+            </span>
+            <span className="text-sm font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+              Save {savePct}%
+            </span>
           </div>
 
-          {/* Pricing breakdown */}
-          <PricingBreakdownDisplay
-            originalPrice={listing.original_price}
-            conditionScore={listing.condition_score}
-            deliveryCost={listing.delivery_cost}
-            platformCommission={listing.platform_commission}
-            paymentFees={listing.payment_fees}
-            finalPrice={listing.final_price}
-            sellerPayout={listing.seller_payout}
-          />
-
-          {/* Seller info (no full address) */}
-          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-            <p className="text-sm font-medium text-gray-700 mb-2">Seller</p>
-            <div className="flex items-center gap-3">
-              {listing.seller.profile_picture ? (
-                <img
-                  src={listing.seller.profile_picture}
-                  alt={listing.seller.name}
-                  className="w-10 h-10 rounded-full object-cover"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
-                  {listing.seller.name[0]?.toUpperCase()}
-                </div>
-              )}
-              <div>
-                <p className="font-medium text-gray-900">{listing.seller.name}</p>
-                {listing.seller.rating != null && (
-                  <p className="text-xs text-gray-500">
-                    ★ {listing.seller.rating.toFixed(1)} rating
-                  </p>
-                )}
-              </div>
-            </div>
-            {/* Show city/state only — no full address */}
-            {listing.location && (
-              <p className="text-xs text-gray-400 mt-2">
-                📍 {listing.location.city}, {listing.location.state}
-              </p>
-            )}
-          </div>
+          {/* Eco line */}
+          <p className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2.5 border border-green-100">
+            🌱 Buying this book saves <strong>{treesPerBook} trees</strong> and reduces CO₂ emissions
+          </p>
 
           {/* Action buttons */}
-          <div className="flex gap-3 pt-2">
-            <button
-              onClick={() => onPlaceOrder?.(listing)}
-              disabled={listing.status !== 'active'}
-              aria-label="Place order"
-              className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors"
-            >
-              {listing.status === 'active' ? 'Place Order' : 'Unavailable'}
-            </button>
+          {!orderSuccess && (
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => {
+                  if (!listing || listing.status !== 'active') return;
+                  const inCart = isInCart(listing.id);
+                  if (!inCart) {
+                    addItem({
+                      listingId: listing.id,
+                      title: listing.book!.title,
+                      author: listing.book!.author,
+                      price: listing.final_price,
+                      image: listing.images?.[0],
+                      conditionScore: listing.condition_score,
+                    });
+                  }
+                }}
+                disabled={listing.status !== 'active'}
+                className={`flex-1 py-3 font-semibold rounded-xl transition-colors ${isInCart(listing.id)
+                    ? 'bg-green-50 border-2 border-green-600 text-green-700'
+                    : 'bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white'
+                  }`}
+              >
+                {listing.status !== 'active'
+                  ? 'Unavailable'
+                  : isInCart(listing.id)
+                    ? '✓ Added to Cart'
+                    : 'Add to Cart'}
+              </button>
+              <button
+                onClick={() => { setWishlistAdded(true); onAddToWishlist?.(listing!); }}
+                disabled={wishlistAdded}
+                aria-label={wishlistAdded ? 'Added to wishlist' : 'Add to wishlist'}
+                className={`px-4 py-3 rounded-xl border-2 font-semibold transition-colors text-lg ${wishlistAdded ? 'border-pink-400 text-pink-600 bg-pink-50' : 'border-gray-300 text-gray-700 hover:border-pink-400 hover:text-pink-600'}`}
+              >
+                {wishlistAdded ? '♥' : '♡'}
+              </button>
+            </div>
+          )}
 
-            <button
-              onClick={handleAddToWishlist}
-              disabled={wishlistAdded}
-              aria-label={wishlistAdded ? 'Added to wishlist' : 'Add to wishlist'}
-              className={`px-4 py-3 rounded-xl border-2 font-semibold transition-colors ${
-                wishlistAdded
-                  ? 'border-pink-400 text-pink-600 bg-pink-50'
-                  : 'border-gray-300 text-gray-700 hover:border-pink-400 hover:text-pink-600'
-              }`}
-            >
-              {wishlistAdded ? '♥' : '♡'}
-            </button>
+          {orderError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{orderError}</div>
+          )}
+
+          {/* Metadata table */}
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-gray-100">
+                {listing.book.isbn && (
+                  <tr className="bg-gray-50">
+                    <td className="px-4 py-2.5 font-medium text-gray-600 w-36">ISBN</td>
+                    <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{listing.book.isbn}</td>
+                  </tr>
+                )}
+                {listing.book.publisher && (
+                  <tr>
+                    <td className="px-4 py-2.5 font-medium text-gray-600">Publisher</td>
+                    <td className="px-4 py-2.5 text-gray-900">{listing.book.publisher}</td>
+                  </tr>
+                )}
+                <tr className="bg-gray-50">
+                  <td className="px-4 py-2.5 font-medium text-gray-600">Condition Score</td>
+                  <td className="px-4 py-2.5 text-gray-900">{listing.condition_score}/5</td>
+                </tr>
+                {listing.damage_notes && (
+                  <tr>
+                    <td className="px-4 py-2.5 font-medium text-gray-600">Damage Notes</td>
+                    <td className="px-4 py-2.5 text-gray-900">{listing.damage_notes}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -214,7 +273,7 @@ export default function BookDetailPage({
       {/* Description */}
       {listing.book.description && (
         <div className="mt-8 border-t border-gray-200 pt-6">
-          <h2 className="font-semibold text-gray-900 mb-2">About this book</h2>
+          <h2 className="font-semibold text-gray-900 mb-2">Description</h2>
           <p className="text-gray-600 text-sm leading-relaxed">{listing.book.description}</p>
         </div>
       )}
