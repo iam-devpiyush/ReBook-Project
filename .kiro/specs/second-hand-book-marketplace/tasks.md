@@ -31,7 +31,7 @@ The implementation focuses on building a complete marketplace with admin moderat
   - Install dev dependencies: @types/node, @types/react, eslint, prettier
   - _Requirements: Foundation for all subsequent tasks_
 
-- [ ] 2. Set up Supabase project and database schema
+- [~] 2. Set up Supabase project and database schema
   - [x] 2.1 Initialize Supabase project
     - Create Supabase project via dashboard or CLI
     - Configure environment variables (.env.local) with Supabase URL and anon key
@@ -62,7 +62,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Test database connection from Next.js app
     - _Requirements: 20.1_
 
-- [ ] 3. Configure Supabase Auth with OAuth providers
+- [~] 3. Configure Supabase Auth with OAuth providers
   - [x] 3.1 Set up OAuth providers in Supabase dashboard
     - Configure Google OAuth provider with client ID and secret
     - Configure Apple OAuth provider with credentials
@@ -85,7 +85,7 @@ The implementation focuses on building a complete marketplace with admin moderat
   - Set up automatic image optimization if available
   - _Requirements: 2.4, 21.1-21.7_
 
-- [ ] 5. Set up Meilisearch for search
+- [~] 5. Set up Meilisearch for search
   - [x] 5.1 Install and configure Meilisearch client
     - Install meilisearch SDK
     - Configure connection to Meilisearch instance
@@ -110,7 +110,7 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 2: Supabase Authentication and User Management
 
-- [ ] 7. Implement Supabase Auth integration
+- [~] 7. Implement Supabase Auth integration
   - [x] 7.1 Create authentication utilities
     - Set up Supabase Auth helpers for Next.js
     - Create server-side auth utilities for API routes
@@ -136,14 +136,14 @@ The implementation focuses on building a complete marketplace with admin moderat
     - **Property: OAuth Authentication Uniqueness**
     - **Validates: Requirements 1.5**
 
-- [ ] 8. Implement session management with Supabase
+- [~] 8. Implement session management with Supabase
   - [x] 8.1 Configure session handling
     - Set up Supabase session management with cookies
     - Configure session expiration (7 days)
     - Implement automatic session refresh
     - _Requirements: 1.6, 1.7, 23.3_
 
-  - [-] 8.2 Create authentication middleware for API routes
+  - [x] 8.2 Create authentication middleware for API routes
     - Implement getUser middleware to verify session
     - Create requireAuth middleware for protected routes
     - Create requireSeller middleware for seller-only routes
@@ -156,45 +156,45 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Handle session expiration gracefully
     - _Requirements: 1.8, 1.9_
 
-- [ ] 9. Create authentication API routes
-  - [~] 9.1 Implement /api/auth/callback route
+- [~] 9. Create authentication API routes
+  - [x] 9.1 Implement /api/auth/callback route
     - Handle OAuth callback from Supabase Auth
     - Exchange code for session
     - Redirect to dashboard after successful auth
     - _Requirements: 1.1, 1.2_
 
-  - [~] 9.2 Implement /api/auth/signout route
+  - [x] 9.2 Implement /api/auth/signout route
     - Call Supabase signOut
     - Clear session cookies
     - Return success response
     - _Requirements: 1.8_
 
-  - [~] 9.3 Implement /api/auth/me route
+  - [x] 9.3 Implement /api/auth/me route
     - Return current authenticated user from Supabase
     - Include user profile and eco_impact
     - _Requirements: User profile access_
 
-- [ ] 10. Build frontend authentication components
-  - [~] 10.1 Create AuthPage with OAuth buttons
+- [~] 10. Build frontend authentication components
+  - [x] 10.1 Create AuthPage with OAuth buttons
     - Build OAuth login buttons for Google, Apple, Microsoft
     - Implement OAuth redirect flow using Supabase Auth
     - Handle OAuth callback and session storage
     - _Requirements: 1.1_
 
-  - [~] 10.2 Implement authentication state management
+  - [x] 10.2 Implement authentication state management
     - Create auth store with Zustand
     - Subscribe to Supabase auth state changes
     - Implement login, logout actions
     - Create useAuth hook for components
     - _Requirements: 1.6, 1.7, 1.8_
 
-  - [~] 10.3 Create protected route wrapper component
+  - [x] 10.3 Create protected route wrapper component
     - Check authentication status using Supabase
     - Redirect to login if not authenticated
     - Handle session refresh automatically
     - _Requirements: 1.9_
 
-- [~] 11. Checkpoint - Verify authentication system
+- [x] 11. Checkpoint - Verify authentication system
   - Test OAuth login flow for all providers
   - Verify session token generation and validation
   - Test protected routes require authentication
@@ -204,15 +204,15 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 3: Enhanced AI Scanner with ISBN Detection
 
-- [ ] 12. Implement image upload to Supabase Storage
-  - [ ] 12.1 Create image upload utilities
+- [x] 12. Implement image upload to Supabase Storage
+  - [x] 12.1 Create image upload utilities
     - Create utility functions for Supabase Storage uploads
     - Implement image validation (JPEG, PNG, max 5MB)
     - Generate unique file names with UUIDs
     - Configure storage bucket paths
     - _Requirements: 2.4, 21.1-21.7_
 
-  - [ ] 12.2 Create /api/listings/images API route
+  - [x] 12.2 Create /api/listings/images API route
     - Accept multipart/form-data image uploads
     - Validate image file type and size
     - Upload images to Supabase Storage book-images bucket
@@ -221,19 +221,19 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Return Supabase Storage public URLs
     - _Requirements: 2.4, 17.4, 17.5, 21.2, 21.6_
 
-  - [ ] 12.3 Write property test for image upload constraints
+  - [x] 12.3 Write property test for image upload constraints
     - **Property: Image Upload Constraints**
     - **Validates: Requirements 2.4, 17.4, 17.5**
 
-- [ ] 13. Implement Enhanced AI Scanner with ISBN detection
-  - [ ] 13.1 Create ISBN barcode detection service
+- [x] 13. Implement Enhanced AI Scanner with ISBN detection
+  - [x] 13.1 Create ISBN barcode detection service
     - Implement detectISBNBarcode function using OCR or barcode detection library
     - Analyze front cover and back cover images
     - Extract ISBN-10 or ISBN-13 from barcode
     - Return detected ISBN or null
     - _Requirements: 2.5, 2.6_
 
-  - [ ] 13.2 Implement book metadata fetching service
+  - [x] 13.2 Implement book metadata fetching service
     - Integrate with book database API (Google Books API, Open Library, etc.)
     - Create fetchBookMetadata function accepting ISBN
     - Fetch title, author, publisher, edition, publication_year, cover_image
@@ -241,7 +241,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Handle API failures gracefully
     - _Requirements: 2.7, 2.12_
 
-  - [ ] 13.3 Create condition analysis algorithm
+  - [x] 13.3 Create condition analysis algorithm
     - Implement analyzeBookCondition function
     - Analyze cover damage, page quality, binding quality, markings, discoloration
     - Assign component scores (1-5) for each factor
@@ -249,11 +249,11 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Return ConditionAnalysis object
     - _Requirements: 2.8, 2.9, 2.10_
 
-  - [ ] 13.4 Write property test for condition score validity
+  - [x] 13.4 Write property test for condition score validity
     - **Property: Condition Score Validity**
     - **Validates: Requirements 2.10**
 
-  - [ ] 13.5 Create /api/ai/scan API route
+  - [x] 13.5 Create /api/ai/scan API route
     - Accept array of image URLs and scan_id
     - Subscribe to Supabase Realtime channel for progress updates
     - Publish progress: 0% -   ing scan
@@ -268,16 +268,16 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Return ScanResult with ISBN, metadata, condition
     - _Requirements: 2.5-2.11_
 
-  - [ ] 13.6 Write property test for ISBN detection accuracy
+  - [x] 13.6 Write property test for ISBN detection accuracy
     - **Property: ISBN Detection Accuracy**
     - **Validates: Requirements 2.5, 2.6**
 
-  - [ ] 13.7 Write property test for metadata auto-fill
+  - [x] 13.7 Write property test for metadata auto-fill
     - **Property: Metadata Auto-fill**
     - **Validates: Requirements 2.7**
 
-- [ ] 14. Build frontend AI scanner components
-  - [ ] 14.1 Create EnhancedAIScannerComponent
+- [x] 14. Build frontend AI scanner components
+  - [x] 14.1 Create EnhancedAIScannerComponent
     - Detect platform (desktop vs mobile)
     - Generate QR code for desktop users
     - Open camera directly for mobile users
@@ -288,20 +288,20 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Show detected ISBN and auto-filled metadata
     - _Requirements: 2.1, 2.2, 2.3, 2.11_
 
-  - [ ] 14.2 Create QRCodeGenerator component
+  - [x] 14.2 Create QRCodeGenerator component
     - Generate QR code with mobile camera URL
     - Display QR code on desktop
     - Handle QR code scanning from mobile
     - _Requirements: 2.1_
 
-  - [ ] 14.3 Create CameraCapture component
+  - [x] 14.3 Create CameraCapture component
     - Open device camera
     - Capture images for each book section
     - Show image previews
     - Allow retake if needed
     - _Requirements: 2.2, 2.3_
 
-- [ ] 15. Checkpoint - Verify AI scanner system
+- [x] 15. Checkpoint - Verify AI scanner system
   - Test ISBN detection with sample book images
   - Verify metadata fetching from external API
   - Test condition analysis returns valid scores
@@ -312,8 +312,8 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 4: Enhanced Pricing Engine and Listing Management
 
-- [ ] 16. Implement Enhanced Pricing Engine with real costs
-  - [ ] 16.1 Create shipping API integration service
+- [x] 16. Implement Enhanced Pricing Engine with real costs
+  - [x] 16.1 Create shipping API integration service
     - Integrate with Delhivery or Shiprocket API
     - Implement fetchDeliveryCost function
     - Accept origin and destination locations, estimated weight
@@ -321,7 +321,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Handle API failures with cached estimates
     - _Requirements: 4.3, 7.1, 7.2, 19.4_
 
-  - [ ] 16.2 Create pricing calculation algorithm
+  - [x] 16.2 Create pricing calculation algorithm
     - Implement calculateEnhancedPricing function
     - Apply condition multipliers: 5→0.80, 4→0.70, 3→0.60, 2→0.40, 1→0.25
     - Calculate base_price = original_price × condition_multiplier
@@ -334,22 +334,22 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Return PricingBreakdown object
     - _Requirements: 4.1-4.10_
 
-  - [ ] 16.3 Write property test for pricing formula correctness
+  - [x] 16.3 Write property test for pricing formula correctness
     - **Property: Enhanced Pricing Formula Correctness**
     - **Validates: Requirements 4.1-4.10**
 
-  - [ ] 16.4 Write property test for seller payout calculation
+  - [x] 16.4 Write property test for seller payout calculation
     - **Property: Seller Payout Calculation**
     - **Validates: Requirements 4.7**
 
-  - [ ] 16.5 Create /api/pricing/calculate API route
+  - [x] 16.5 Create /api/pricing/calculate API route
     - Accept original_price, condition_score, seller_location, buyer_location
     - Call calculateEnhancedPricing function
     - Return pricing breakdown with all components
     - _Requirements: 4.1-4.10_
 
-- [ ] 17. Implement listing management with admin approval
-  - [ ] 17.1 Create /api/listings API route (POST)
+- [x] 17. Implement listing management with admin approval
+  - [x] 17.1 Create /api/listings API route (POST)
     - Verify seller is authenticated via Supabase Auth
     - Validate listing data with Zod schema
     - Create listing in Supabase with status "pending_approval"
@@ -357,34 +357,34 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Return listing object
     - _Requirements: 2.1-2.10, 3.1, 3.2_
 
-  - [ ] 17.2 Create /api/listings/[id] API route (GET)
+  - [x] 17.2 Create /api/listings/[id] API route (GET)
     - Fetch listing by ID from Supabase with book and seller data
     - Increment view count
     - Return listing details
     - _Requirements: Listing detail view_
 
-  - [ ] 17.3 Create /api/listings/seller/me API route (GET)
+  - [x] 17.3 Create /api/listings/seller/me API route (GET)
     - Fetch all listings for authenticated seller from Supabase
     - Filter by status if provided
     - Return listings with pagination
     - _Requirements: Seller portal_
 
-  - [ ] 17.4 Create /api/listings/[id] API route (PUT)
+  - [x] 17.4 Create /api/listings/[id] API route (PUT)
     - Verify seller owns the listing
     - Check listing status allows editing
     - Update listing in Supabase
     - Return updated listing
     - _Requirements: Listing editing_
 
-  - [ ] 17.5 Create /api/listings/[id] API route (DELETE)
+  - [x] 17.5 Create /api/listings/[id] API route (DELETE)
     - Verify seller owns the listing
     - Check listing status is not "sold"
     - Delete listing from Supabase
     - Return success response
     - _Requirements: Listing deletion_
 
-- [ ] 18. Build frontend listing creation flow
-  - [ ] 18.1 Create CreateListingForm component (multi-step)
+- [x] 18. Build frontend listing creation flow
+  - [x] 18.1 Create CreateListingForm component (multi-step)
     - Step 1: Use EnhancedAIScannerComponent for image capture
     - Step 2: Display auto-filled book details (or manual entry if ISBN not detected)
     - Step 3: Review condition score and pricing breakdown
@@ -393,13 +393,13 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Add validation with Zod schemas
     - _Requirements: 2.1-2.12_
 
-  - [ ] 18.2 Create ConditionBadge component
+  - [x] 18.2 Create ConditionBadge component
     - Display condition score (1-5) with visual indicators
     - Show color-coded badge (5=green, 4=light-green, 3=yellow, 2=orange, 1=red)
     - Display condition label (Like New, Very Good, Good, Acceptable, Poor)
     - _Requirements: Condition display_
 
-  - [ ] 18.3 Create PricingBreakdownDisplay component
+  - [x] 18.3 Create PricingBreakdownDisplay component
     - Show original price
     - Show base price with condition multiplier
     - Show delivery cost
@@ -410,7 +410,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Format all prices in Indian Rupees with ₹ symbol
     - _Requirements: 4.8, 4.9, 4.10_
 
-- [ ] 19. Checkpoint - Verify listing management system
+- [x] 19. Checkpoint - Verify listing management system
   - Test listing creation flow end-to-end
   - Verify AI scanner integration works
   - Verify pricing calculation with real delivery costs
@@ -420,8 +420,8 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 5: Admin Dashboard and Moderation System
 
-- [ ] 20. Implement admin approval service
-  - [ ] 20.1 Create admin approval algorithm
+- [x] 20. Implement admin approval service
+  - [x] 20.1 Create admin approval algorithm
     - Implement processAdminApproval function
     - Validate listing is pending approval
     - Verify admin permissions
@@ -434,76 +434,76 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Add/remove from Meilisearch index based on status
     - _Requirements: 3.3-3.11_
 
-  - [ ] 20.2 Write property test for admin approval requirement
+  - [x] 20.2 Write property test for admin approval requirement
     - **Property: Admin Approval Requirement**
     - **Validates: Requirements 3.4, 3.5**
 
-  - [ ] 20.3 Write property test for listing status transitions
+  - [x] 20.3 Write property test for listing status transitions
     - **Property: Listing Status Transitions with Approval**
     - **Validates: Requirements 3.3-3.11**
 
-- [ ] 21. Create admin moderation API routes
-  - [ ] 21.1 Implement /api/admin/listings API route (GET)
+- [x] 21. Create admin moderation API routes
+  - [x] 21.1 Implement /api/admin/listings API route (GET)
     - Require admin authentication
     - Fetch listings by status from Supabase (pending_approval, active, rejected, etc.)
     - Return listings with pagination
     - _Requirements: 3.3, 9.2_
 
-  - [ ] 21.2 Implement /api/admin/listings/[id]/approve API route (PUT)
+  - [x] 21.2 Implement /api/admin/listings/[id]/approve API route (PUT)
     - Require admin authentication
     - Call processAdminApproval with "approve" action
     - Return updated listing
     - _Requirements: 3.4, 3.5, 3.6_
 
-  - [ ] 21.3 Implement /api/admin/listings/[id]/reject API route (PUT)
+  - [x] 21.3 Implement /api/admin/listings/[id]/reject API route (PUT)
     - Require admin authentication
     - Validate rejection reason is provided
     - Call processAdminApproval with "reject" action
     - Return updated listing
     - _Requirements: 3.7_
 
-  - [ ] 21.4 Implement /api/admin/listings/[id]/request-rescan API route (PUT)
+  - [x] 21.4 Implement /api/admin/listings/[id]/request-rescan API route (PUT)
     - Require admin authentication
     - Call processAdminApproval with "request_rescan" action
     - Return updated listing
     - _Requirements: 3.8_
 
-- [ ] 22. Implement admin user management
-  - [ ] 22.1 Create /api/admin/users API route (GET)
+- [x] 22. Implement admin user management
+  - [x] 22.1 Create /api/admin/users API route (GET)
     - Require admin authentication
     - Fetch users from Supabase with filters
     - Return users with pagination
     - _Requirements: 9.3_
 
-  - [ ] 22.2 Create /api/admin/users/[id]/suspend API route (PUT)
+  - [x] 22.2 Create /api/admin/users/[id]/suspend API route (PUT)
     - Require admin authentication
     - Set suspended_until timestamp in Supabase
     - Create moderation log entry
     - Send notification to user via Supabase Realtime
     - _Requirements: 9.3, 9.4, 24.5_
 
-  - [ ] 22.3 Create /api/admin/users/[id]/warn API route (POST)
+  - [x] 22.3 Create /api/admin/users/[id]/warn API route (POST)
     - Require admin authentication
     - Send warning notification to seller via Supabase Realtime
     - Create moderation log entry
     - _Requirements: 9.5_
 
-  - [ ] 22.4 Create /api/admin/users/[id]/limit-listings API route (PUT)
+  - [x] 22.4 Create /api/admin/users/[id]/limit-listings API route (PUT)
     - Require admin authentication
     - Set listing_limit for seller in Supabase
     - Create moderation log entry
     - _Requirements: 9.6, 9.7, 18.6_
 
-  - [ ] 22.5 Write property test for user suspension enforcement
+  - [x] 22.5 Write property test for user suspension enforcement
     - **Property: User Suspension Enforcement**
     - **Validates: Requirements 9.4, 24.5**
 
-  - [ ] 22.6 Write property test for listing limit enforcement
+  - [x] 22.6 Write property test for listing limit enforcement
     - **Property: Listing Limit Enforcement**
     - **Validates: Requirements 9.6, 9.7, 18.6**
 
-- [ ] 23. Implement platform statistics and analytics
-  - [ ] 23.1 Create platform stats calculation service
+- [x] 23. Implement platform statistics and analytics
+  - [x] 23.1 Create platform stats calculation service
     - Implement calculatePlatformStats function
     - Aggregate total_books_listed, total_books_sold, active_listings from Supabase
     - Calculate total_users, total_buyers, total_sellers
@@ -512,71 +512,71 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Store daily stats in platform_stats table
     - _Requirements: 9.1, 16.1-16.6_
 
-  - [ ] 23.2 Create /api/admin/stats API route (GET)
+  - [x] 23.2 Create /api/admin/stats API route (GET)
     - Require admin authentication
     - Fetch platform statistics from Supabase
     - Implement application-level caching (15 minutes)
     - Return stats with charts data
     - _Requirements: 9.1, 16.4_
 
-  - [ ] 23.3 Create /api/admin/analytics API route (GET)
+  - [x] 23.3 Create /api/admin/analytics API route (GET)
     - Require admin authentication
     - Generate charts: daily sales, listings per day, revenue by category
     - Return analytics data
     - _Requirements: 9.12_
 
-  - [ ] 23.4 Write property test for platform stats accuracy
+  - [x] 23.4 Write property test for platform stats accuracy
     - **Property: Platform Stats Accuracy**
     - **Validates: Requirements 16.1-16.3**
 
-- [ ] 24. Implement moderation logging
-  - [ ] 24.1 Create moderation log service
+- [x] 24. Implement moderation logging
+  - [x] 24.1 Create moderation log service
     - Implement logModerationAction function
     - Store admin_id, action, target_type, target_id, reason, notes, timestamp in Supabase
     - _Requirements: 3.9, 24.1, 24.2_
 
-  - [ ] 24.2 Create /api/admin/moderation-logs API route (GET)
+  - [x] 24.2 Create /api/admin/moderation-logs API route (GET)
     - Require admin authentication
     - Fetch moderation logs from Supabase with filters (date range, admin, action type)
     - Return logs with pagination
     - _Requirements: 9.11, 24.3_
 
-  - [ ] 24.3 Write property test for moderation log completeness
+  - [x] 24.3 Write property test for moderation log completeness
     - **Property: Moderation Log Completeness**
     - **Validates: Requirements 3.9, 24.1, 24.2**
 
-- [ ] 25. Build admin dashboard frontend
-  - [ ] 25.1 Create AdminDashboard component
+- [~] 25. Build admin dashboard frontend
+  - [x] 25.1 Create AdminDashboard component
     - Display platform overview with key metrics
     - Show charts for daily sales, listings, revenue
     - Display environmental impact metrics
     - _Requirements: 9.1, 9.12_
 
-  - [ ] 25.2 Create PendingListingsTable component
+  - [x] 25.2 Create PendingListingsTable component
     - Display pending listings with book details, seller info
     - Add approve, reject, request rescan buttons
     - Implement modal for rejection reason input
     - _Requirements: 9.2, 3.3-3.8_
 
-  - [ ] 25.3 Create UserManagementTable component
+  - [x] 25.3 Create UserManagementTable component
     - Display users with filters
     - Add suspend, warn, limit listings actions
     - Implement modals for action inputs
     - _Requirements: 9.3-9.7_
 
-  - [ ] 25.4 Create ModerationLogsTable component
+  - [x] 25.4 Create ModerationLogsTable component
     - Display moderation logs with filters
     - Show admin, action, target, reason, timestamp
     - _Requirements: 9.11, 24.3_
 
-  - [ ] 25.5 Create AnalyticsCharts component
+  - [x] 25.5 Create AnalyticsCharts component
     - Display daily sales chart
     - Display listings per day chart
     - Display revenue by category chart
     - Use chart library (recharts or chart.js)
     - _Requirements: 9.12_
 
-- [ ] 26. Checkpoint - Verify admin dashboard system
+- [x] 26. Checkpoint - Verify admin dashboard system
   - Test admin approval flow for listings
   - Verify Supabase Realtime notifications sent to sellers
   - Test user suspension and listing limits
@@ -587,26 +587,26 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 6: Meilisearch-Powered Search and Discovery
 
-- [ ] 27. Implement Meilisearch indexing service
-  - [ ] 27.1 Create search index management functions
+- [x] 27. Implement Meilisearch indexing service
+  - [x] 27.1 Create search index management functions
     - Implement addToMeilisearchIndex function
     - Implement updateMeilisearchIndex function
     - Implement removeFromMeilisearchIndex function
     - Index listing with book data, location, pricing
     - _Requirements: 5.10, 5.11_
 
-  - [ ] 27.2 Integrate indexing with listing lifecycle
+  - [x] 27.2 Integrate indexing with listing lifecycle
     - Add to index when listing approved (status → active)
     - Remove from index when listing status changes from active
     - Update index when listing details change
     - _Requirements: 5.10, 5.11_
 
-  - [ ] 27.3 Write property test for search index consistency
+  - [x] 27.3 Write property test for search index consistency
     - **Property: Meilisearch Index Consistency**
     - **Validates: Requirements 5.10, 5.11**
 
-- [ ] 28. Implement search service with filters
-  - [ ] 28.1 Create search function with Meilisearch
+- [x] 28. Implement search service with filters
+  - [x] 28.1 Create search function with Meilisearch
     - Implement searchListings function
     - Perform typo-tolerant full-text search on title, author, subject, ISBN
     - Apply filters: category, condition_score, price_range
@@ -616,42 +616,42 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Implement pagination
     - _Requirements: 5.1-5.9_
 
-  - [ ] 28.2 Write property test for search result relevance
+  - [x] 28.2 Write property test for search result relevance
     - **Property: Search Result Relevance**
     - **Validates: Requirements 5.1-5.7**
 
-  - [ ] 28.3 Implement autocomplete function
+  - [x] 28.3 Implement autocomplete function
     - Create getAutocomplete function
     - Return suggestions from titles and authors
     - Limit to 10 suggestions
     - _Requirements: Search UX_
 
-  - [ ] 28.4 Implement faceted search
+  - [x] 28.4 Implement faceted search
     - Return facets for categories, condition scores, price ranges
     - Show counts for each facet value
     - _Requirements: Search filtering_
 
-- [ ] 29. Create search API routes
-  - [ ] 29.1 Implement /api/search API route (GET)
+- [x] 29. Create search API routes
+  - [x] 29.1 Implement /api/search API route (GET)
     - Accept query, filters, user location, sort_by, page, page_size
     - Call searchListings function
     - Return search results with pagination metadata
     - Implement application-level caching for popular queries (5-minute TTL)
     - _Requirements: 5.1-5.9, 22.1, 22.7_
 
-  - [ ] 29.2 Implement /api/search/autocomplete API route (GET)
+  - [x] 29.2 Implement /api/search/autocomplete API route (GET)
     - Accept partial query string
     - Call getAutocomplete function
     - Return suggestions
     - _Requirements: Search autocomplete_
 
-  - [ ] 29.3 Implement /api/search/facets API route (GET)
+  - [x] 29.3 Implement /api/search/facets API route (GET)
     - Accept current search query and filters
     - Return facets with counts
     - _Requirements: Faceted search_
 
-- [ ] 30. Implement category management
-  - [ ] 30.1 Create category CRUD API routes
+- [x] 30. Implement category management
+  - [x] 30.1 Create category CRUD API routes
     - Implement /api/categories API route (GET - public)
     - Implement /api/admin/categories API route (POST - admin only)
     - Implement /api/admin/categories/[id] API route (PUT - admin only)
@@ -659,12 +659,12 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Validate category hierarchy (no circular references)
     - _Requirements: 9.10, 14.1-14.9_
 
-  - [ ] 30.2 Write property test for category hierarchy validity
+  - [x] 30.2 Write property test for category hierarchy validity
     - **Property: Category Hierarchy Validity**
     - **Validates: Requirements 14.7, 14.8**
 
-- [ ] 31. Build frontend search and discovery components
-  - [ ] 31.1 Create SearchPage component
+- [x] 31. Build frontend search and discovery components
+  - [x] 31.1 Create SearchPage component
     - Integrate SearchBar with autocomplete
     - Integrate FilterPanel for categories, condition, price
     - Integrate SortDropdown for sorting options
@@ -672,20 +672,20 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Implement pagination or infinite scroll
     - _Requirements: 5.1-5.9_
 
-  - [ ] 31.2 Create SearchBar component
+  - [x] 31.2 Create SearchBar component
     - Implement search input with autocomplete
     - Fetch suggestions on typing
     - Handle search submission
     - _Requirements: 5.1_
 
-  - [ ] 31.3 Create FilterPanel component
+  - [x] 31.3 Create FilterPanel component
     - Build category filter dropdown
     - Build condition score filter
     - Build price range filters
     - Apply filters on change
     - _Requirements: 5.3, 5.4, 5.5_
 
-  - [ ] 31.4 Create ListingCard component
+  - [x] 31.4 Create ListingCard component
     - Display book image, title, author
     - Show condition badge
     - Display final price
@@ -693,7 +693,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Add click handler to navigate to detail page
     - _Requirements: Search results display_
 
-  - [ ] 31.5 Create BookDetailPage component
+  - [x] 31.5 Create BookDetailPage component
     - Fetch and display listing details
     - Show image gallery
     - Display condition details
@@ -703,7 +703,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Add "Add to Wishlist" button
     - _Requirements: Listing detail view_
 
-- [ ] 32. Checkpoint - Verify search and discovery system
+- [x] 32. Checkpoint - Verify search and discovery system
   - Test search with various queries and filters
   - Verify typo tolerance works
   - Test proximity-based ranking
@@ -714,64 +714,64 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 7: Payment Gateway Integration
 
-- [ ] 33. Implement payment gateway service
-  - [ ] 33.1 Configure Stripe or Razorpay SDK
+- [x] 33. Implement payment gateway service
+  - [~] 33.1 Configure Stripe or Razorpay SDK
     - Install payment gateway SDK
     - Configure API keys and webhooks
     - Set up webhook signature verification
     - _Requirements: 6.1, 6.9_
 
-  - [ ] 33.2 Create payment intent creation function
+  - [~] 33.2 Create payment intent creation function
     - Implement createPaymentIntent function
     - Accept order_id and amount
     - Create payment intent with gateway
     - Return payment session for frontend
     - _Requirements: 6.1, 6.2_
 
-  - [ ] 33.3 Create payment verification function
+  - [~] 33.3 Create payment verification function
     - Implement verifyPayment function
     - Verify payment status with gateway
     - Return payment confirmation
     - _Requirements: 6.3, 6.4_
 
-  - [ ] 33.4 Create refund processing function
+  - [~] 33.4 Create refund processing function
     - Implement processRefund function
     - Process refund through gateway
     - Update payment record in Supabase with refund details
     - _Requirements: 6.7, 6.8_
 
-  - [ ] 33.5 Write property test for payment status progression
+  - [~] 33.5 Write property test for payment status progression
     - **Property: Payment Status Progression**
     - **Validates: Requirements 6.3-6.8**
 
 - [ ] 34. Create payment API routes
-  - [ ] 34.1 Implement /api/payments/create-intent API route (POST)
+  - [~] 34.1 Implement /api/payments/create-intent API route (POST)
     - Accept order_id
     - Fetch order details from Supabase
     - Create payment intent
     - Return payment session
     - _Requirements: 6.1, 6.2_
 
-  - [ ] 34.2 Implement /api/payments/webhook API route (POST)
+  - [~] 34.2 Implement /api/payments/webhook API route (POST)
     - Verify webhook signature
     - Handle payment status updates
     - Update order and payment records in Supabase
     - Publish Supabase Realtime notifications
     - _Requirements: 6.9, 6.10_
 
-  - [ ] 34.3 Implement /api/payments/[id]/refund API route (POST)
+  - [~] 34.3 Implement /api/payments/[id]/refund API route (POST)
     - Require admin authentication
     - Validate refund amount
     - Process refund
     - Update payment status in Supabase
     - _Requirements: 6.7, 6.8, 9.9_
 
-  - [ ] 34.4 Write property test for refund amount validity
+  - [~] 34.4 Write property test for refund amount validity
     - **Property: Refund Amount Validity**
     - **Validates: Requirements 6.7, 6.8**
 
 - [ ] 35. Build frontend payment components
-  - [ ] 35.1 Create CheckoutPage component
+  - [~] 35.1 Create CheckoutPage component
     - Display order summary
     - Show pricing breakdown
     - Integrate payment gateway UI (Stripe Elements or Razorpay Checkout)
@@ -779,7 +779,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Show success/failure messages
     - _Requirements: 6.1-6.6_
 
-  - [ ] 35.2 Create PaymentStatusDisplay component
+  - [~] 35.2 Create PaymentStatusDisplay component
     - Show payment status
     - Display payment method
     - Show transaction ID

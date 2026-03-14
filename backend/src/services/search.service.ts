@@ -34,6 +34,11 @@ export interface ListingDocument {
   updated_at: string;
 }
 
+export interface UserLocation {
+  latitude: number;
+  longitude: number;
+}
+
 export interface SearchFilters {
   category_id?: string;
   condition_score_min?: number;
@@ -43,12 +48,37 @@ export interface SearchFilters {
   state?: string;
 }
 
+export type SortBy = 'relevance' | 'price_asc' | 'price_desc' | 'condition_desc' | 'date_desc' | 'proximity';
+
 export interface SearchOptions {
   query: string;
   filters?: SearchFilters;
+  userLocation?: UserLocation;
+  sortBy?: SortBy;
   limit?: number;
   offset?: number;
+  /** @deprecated use sortBy instead */
   sort?: string[];
+}
+
+/**
+ * Calculate haversine distance in km between two lat/lng points
+ */
+export function haversineDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371; // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 export interface SearchResult {
@@ -124,7 +154,8 @@ export async function removeFromMeilisearchIndex(
 }
 
 /**
- * Search listings with filters and sorting
+ * Search listings with filters, sorting, and optional proximity scoring
+ * Requirements: 5.1-5.9
  */
 export async function searchListings(
   options: SearchOptions
@@ -132,7 +163,7 @@ export async function searchListings(
   try {
     const index = getListingsIndex();
 
-    // Build filter string
+    // Build filter string — always restrict to active listings
     const filterParts: string[] = ['status = "active"'];
 
     if (options.filters) {
@@ -165,23 +196,64 @@ export async function searchListings(
 
     const filterString = filterParts.join(' AND ');
 
-    // Execute search
+    // Resolve Meilisearch sort array from sortBy enum
+    let meiliSort: string[] | undefined;
+    const sortBy = options.sortBy;
+
+    if (sortBy === 'price_asc') {
+      meiliSort = ['final_price:asc'];
+    } else if (sortBy === 'price_desc') {
+      meiliSort = ['final_price:desc'];
+    } else if (sortBy === 'condition_desc') {
+      meiliSort = ['condition_score:desc'];
+    } else if (sortBy === 'date_desc') {
+      meiliSort = ['created_at:desc'];
+    } else if (options.sort) {
+      // Legacy support
+      meiliSort = options.sort;
+    }
+    // 'relevance' and 'proximity' use Meilisearch's default ranking
+
+    const limit = options.limit || 20;
+    const offset = options.offset || 0;
+
+    // For proximity sort we fetch a larger set then re-rank client-side
+    const fetchLimit = sortBy === 'proximity' && options.userLocation ? Math.min(limit * 5, 200) : limit;
+
     const result = await index.search(options.query, {
       filter: filterString,
-      limit: options.limit || 20,
-      offset: options.offset || 0,
-      sort: options.sort,
+      limit: fetchLimit,
+      offset: sortBy === 'proximity' ? 0 : offset,
+      sort: meiliSort,
     });
 
+    let hits = result.hits as ListingDocument[];
+
+    // Proximity re-ranking: sort by haversine distance then slice
+    if (sortBy === 'proximity' && options.userLocation) {
+      const { latitude: uLat, longitude: uLon } = options.userLocation;
+      hits = hits
+        .map((h) => ({
+          hit: h,
+          dist:
+            h.location.latitude != null && h.location.longitude != null
+              ? haversineDistance(uLat, uLon, h.location.latitude, h.location.longitude)
+              : Infinity,
+        }))
+        .sort((a, b) => a.dist - b.dist)
+        .slice(offset, offset + limit)
+        .map((x) => x.hit);
+    }
+
     logger.info(
-      `Search completed: query="${options.query}", hits=${result.hits.length}, time=${result.processingTimeMs}ms`
+      `Search completed: query="${options.query}", hits=${hits.length}, time=${result.processingTimeMs}ms`
     );
 
     return {
-      hits: result.hits as ListingDocument[],
+      hits,
       estimatedTotalHits: result.estimatedTotalHits || 0,
-      limit: result.limit || 20,
-      offset: result.offset || 0,
+      limit,
+      offset,
       processingTimeMs: result.processingTimeMs,
     };
   } catch (error) {
@@ -191,11 +263,12 @@ export async function searchListings(
 }
 
 /**
- * Get autocomplete suggestions
+ * Get autocomplete suggestions from titles and authors
+ * Requirements: Search UX
  */
 export async function getAutocompleteSuggestions(
   partialQuery: string,
-  limit: number = 5
+  limit: number = 10
 ): Promise<string[]> {
   try {
     const index = getListingsIndex();
@@ -203,12 +276,24 @@ export async function getAutocompleteSuggestions(
     const result = await index.search(partialQuery, {
       filter: 'status = "active"',
       limit,
-      attributesToRetrieve: ['title'],
+      attributesToRetrieve: ['title', 'author'],
     });
 
-    const suggestions = result.hits
-      .map((hit: any) => hit.title)
-      .filter((title: string) => title);
+    // Collect unique suggestions from both title and author fields
+    const seen = new Set<string>();
+    const suggestions: string[] = [];
+
+    for (const hit of result.hits as any[]) {
+      if (hit.title && !seen.has(hit.title)) {
+        seen.add(hit.title);
+        suggestions.push(hit.title);
+      }
+      if (hit.author && !seen.has(hit.author)) {
+        seen.add(hit.author);
+        suggestions.push(hit.author);
+      }
+      if (suggestions.length >= limit) break;
+    }
 
     return suggestions;
   } catch (error) {
@@ -217,20 +302,57 @@ export async function getAutocompleteSuggestions(
   }
 }
 
+/** Alias for getAutocompleteSuggestions */
+export const getAutocomplete = getAutocompleteSuggestions;
+
+export interface FacetResult {
+  categories: Record<string, number>;
+  conditionScores: Record<string, number>;
+  states: Record<string, number>;
+  priceRanges: Array<{ label: string; min: number; max: number; count: number }>;
+}
+
 /**
- * Get search facets (category counts, price ranges, etc.)
+ * Get search facets: categories, condition scores, states, and price ranges
+ * Requirements: Search filtering
  */
-export async function getSearchFacets(query: string = ''): Promise<any> {
+export async function getSearchFacets(query: string = ''): Promise<FacetResult> {
   try {
     const index = getListingsIndex();
 
     const result = await index.search(query, {
       filter: 'status = "active"',
       facets: ['category_id', 'condition_score', 'location.state'],
-      limit: 0, // We only want facets, not results
+      limit: 0,
     });
 
-    return result.facetDistribution;
+    const dist = result.facetDistribution || {};
+
+    // Build price range counts from a separate search
+    const priceRangeDefs = [
+      { label: 'Under ₹200', min: 0, max: 199 },
+      { label: '₹200 – ₹500', min: 200, max: 500 },
+      { label: '₹500 – ₹1000', min: 501, max: 1000 },
+      { label: '₹1000 – ₹2000', min: 1001, max: 2000 },
+      { label: 'Over ₹2000', min: 2001, max: 999999 },
+    ];
+
+    const priceRanges = await Promise.all(
+      priceRangeDefs.map(async (range) => {
+        const r = await index.search(query, {
+          filter: `status = "active" AND final_price >= ${range.min} AND final_price <= ${range.max}`,
+          limit: 0,
+        });
+        return { ...range, count: r.estimatedTotalHits || 0 };
+      })
+    );
+
+    return {
+      categories: (dist['category_id'] as Record<string, number>) || {},
+      conditionScores: (dist['condition_score'] as Record<string, number>) || {},
+      states: (dist['location.state'] as Record<string, number>) || {},
+      priceRanges,
+    };
   } catch (error) {
     logger.error('Failed to get facets:', error);
     throw error;
