@@ -31,7 +31,7 @@ The implementation focuses on building a complete marketplace with admin moderat
   - Install dev dependencies: @types/node, @types/react, eslint, prettier
   - _Requirements: Foundation for all subsequent tasks_
 
-- [~] 2. Set up Supabase project and database schema
+- [ ] 2. Set up Supabase project and database schema
   - [x] 2.1 Initialize Supabase project
     - Create Supabase project via dashboard or CLI
     - Configure environment variables (.env.local) with Supabase URL and anon key
@@ -62,7 +62,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Test database connection from Next.js app
     - _Requirements: 20.1_
 
-- [~] 3. Configure Supabase Auth with OAuth providers
+- [ ] 3. Configure Supabase Auth with OAuth providers
   - [x] 3.1 Set up OAuth providers in Supabase dashboard
     - Configure Google OAuth provider with client ID and secret
     - Configure Apple OAuth provider with credentials
@@ -85,7 +85,7 @@ The implementation focuses on building a complete marketplace with admin moderat
   - Set up automatic image optimization if available
   - _Requirements: 2.4, 21.1-21.7_
 
-- [~] 5. Set up Meilisearch for search
+- [ ] 5. Set up Meilisearch for search
   - [x] 5.1 Install and configure Meilisearch client
     - Install meilisearch SDK
     - Configure connection to Meilisearch instance
@@ -110,7 +110,7 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 2: Supabase Authentication and User Management
 
-- [~] 7. Implement Supabase Auth integration
+- [ ] 7. Implement Supabase Auth integration
   - [x] 7.1 Create authentication utilities
     - Set up Supabase Auth helpers for Next.js
     - Create server-side auth utilities for API routes
@@ -136,7 +136,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - **Property: OAuth Authentication Uniqueness**
     - **Validates: Requirements 1.5**
 
-- [~] 8. Implement session management with Supabase
+- [ ] 8. Implement session management with Supabase
   - [x] 8.1 Configure session handling
     - Set up Supabase session management with cookies
     - Configure session expiration (7 days)
@@ -156,7 +156,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Handle session expiration gracefully
     - _Requirements: 1.8, 1.9_
 
-- [~] 9. Create authentication API routes
+- [ ] 9. Create authentication API routes
   - [x] 9.1 Implement /api/auth/callback route
     - Handle OAuth callback from Supabase Auth
     - Exchange code for session
@@ -174,7 +174,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Include user profile and eco_impact
     - _Requirements: User profile access_
 
-- [~] 10. Build frontend authentication components
+- [ ] 10. Build frontend authentication components
   - [x] 10.1 Create AuthPage with OAuth buttons
     - Build OAuth login buttons for Google, Apple, Microsoft
     - Implement OAuth redirect flow using Supabase Auth
@@ -545,7 +545,7 @@ The implementation focuses on building a complete marketplace with admin moderat
     - **Property: Moderation Log Completeness**
     - **Validates: Requirements 3.9, 24.1, 24.2**
 
-- [~] 25. Build admin dashboard frontend
+- [ ] 25. Build admin dashboard frontend
   - [x] 25.1 Create AdminDashboard component
     - Display platform overview with key metrics
     - Show charts for daily sales, listings, revenue
@@ -715,63 +715,63 @@ The implementation focuses on building a complete marketplace with admin moderat
 ### Phase 7: Payment Gateway Integration
 
 - [x] 33. Implement payment gateway service
-  - [~] 33.1 Configure Stripe or Razorpay SDK
+  - [x] 33.1 Configure Stripe or Razorpay SDK
     - Install payment gateway SDK
     - Configure API keys and webhooks
     - Set up webhook signature verification
     - _Requirements: 6.1, 6.9_
 
-  - [~] 33.2 Create payment intent creation function
+  - [x] 33.2 Create payment intent creation function
     - Implement createPaymentIntent function
     - Accept order_id and amount
     - Create payment intent with gateway
     - Return payment session for frontend
     - _Requirements: 6.1, 6.2_
 
-  - [~] 33.3 Create payment verification function
+  - [x] 33.3 Create payment verification function
     - Implement verifyPayment function
     - Verify payment status with gateway
     - Return payment confirmation
     - _Requirements: 6.3, 6.4_
 
-  - [~] 33.4 Create refund processing function
+  - [x] 33.4 Create refund processing function
     - Implement processRefund function
     - Process refund through gateway
     - Update payment record in Supabase with refund details
     - _Requirements: 6.7, 6.8_
 
-  - [~] 33.5 Write property test for payment status progression
+  - [x] 33.5 Write property test for payment status progression
     - **Property: Payment Status Progression**
     - **Validates: Requirements 6.3-6.8**
 
-- [ ] 34. Create payment API routes
-  - [~] 34.1 Implement /api/payments/create-intent API route (POST)
+- [x] 34. Create payment API routes
+  - [ ] 34.1 Implement /api/payments/create-intent API route (POST)
     - Accept order_id
     - Fetch order details from Supabase
     - Create payment intent
     - Return payment session
     - _Requirements: 6.1, 6.2_
 
-  - [~] 34.2 Implement /api/payments/webhook API route (POST)
+  - [ ] 34.2 Implement /api/payments/webhook API route (POST)
     - Verify webhook signature
     - Handle payment status updates
     - Update order and payment records in Supabase
     - Publish Supabase Realtime notifications
     - _Requirements: 6.9, 6.10_
 
-  - [~] 34.3 Implement /api/payments/[id]/refund API route (POST)
+  - [ ] 34.3 Implement /api/payments/[id]/refund API route (POST)
     - Require admin authentication
     - Validate refund amount
     - Process refund
     - Update payment status in Supabase
     - _Requirements: 6.7, 6.8, 9.9_
 
-  - [~] 34.4 Write property test for refund amount validity
+  - [ ] 34.4 Write property test for refund amount validity
     - **Property: Refund Amount Validity**
     - **Validates: Requirements 6.7, 6.8**
 
-- [ ] 35. Build frontend payment components
-  - [~] 35.1 Create CheckoutPage component
+- [x] 35. Build frontend payment components
+  - [x] 35.1 Create CheckoutPage component
     - Display order summary
     - Show pricing breakdown
     - Integrate payment gateway UI (Stripe Elements or Razorpay Checkout)
@@ -779,13 +779,13 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Show success/failure messages
     - _Requirements: 6.1-6.6_
 
-  - [~] 35.2 Create PaymentStatusDisplay component
+  - [x] 35.2 Create PaymentStatusDisplay component
     - Show payment status
     - Display payment method
     - Show transaction ID
     - _Requirements: Payment status display_
 
-- [ ] 36. Checkpoint - Verify payment integration
+- [x] 36. Checkpoint - Verify payment integration
   - Test payment intent creation
   - Verify payment processing with test cards
   - Test webhook handling
@@ -875,8 +875,8 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 9: Order Processing with Atomicity
 
-- [ ] 41. Implement order processing service
-  - [ ] 41.1 Create order creation algorithm
+- [x] 41. Implement order processing service
+  - [x] 41.1 Create order creation algorithm
     - Implement processOrder function
     - Validate listing is active
     - Calculate pricing with delivery cost
@@ -886,19 +886,19 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Return order with payment session
     - _Requirements: 11.1-11.9, 20.2_
 
-  - [ ] 41.2 Write property test for active listing uniqueness
+  - [x] 41.2 Write property test for active listing uniqueness
     - **Property: Active Listing Uniqueness**
     - **Validates: Requirements 11.2, 11.3, 20.5**
 
-  - [ ] 41.3 Write property test for order creation atomicity
+  - [x] 41.3 Write property test for order creation atomicity
     - **Property: Order Creation Atomicity**
     - **Validates: Requirements 11.2, 20.2**
 
-  - [ ] 41.4 Write property test for concurrent order prevention
+  - [x] 41.4 Write property test for concurrent order prevention
     - **Property: Concurrent Order Prevention**
     - **Validates: Requirements 11.4, 11.5, 11.6**
 
-  - [ ] 41.5 Create payment confirmation handler
+  - [x] 41.5 Create payment confirmation handler
     - Implement confirmPaymentAndGenerateShipping function
     - Verify payment with gateway
     - Update order status to "paid" in Supabase
@@ -907,16 +907,16 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Publish Supabase Realtime notifications
     - _Requirements: 6.3, 6.4, 6.5, 7.2-7.5_
 
-  - [ ] 41.6 Write property test for order status with payment
+  - [x] 41.6 Write property test for order status with payment
     - **Property: Order Status with Payment**
     - **Validates: Requirements 6.4, 6.5**
 
-  - [ ] 41.7 Write property test for shipping label generation
+  - [x] 41.7 Write property test for shipping label generation
     - **Property: Shipping Label Generation**
     - **Validates: Requirements 7.2, 7.3, 7.4**
 
-- [ ] 42. Create order API routes
-  - [ ] 42.1 Implement /api/orders API route (POST)
+- [x] 42. Create order API routes
+  - [x] 42.1 Implement /api/orders API route (POST)
     - Verify buyer is authenticated
     - Validate order data (listing_id, delivery_address)
     - Call processOrder function
@@ -924,19 +924,19 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Return order with payment session
     - _Requirements: 11.1-11.9_
 
-  - [ ] 42.2 Implement /api/orders API route (GET)
+  - [x] 42.2 Implement /api/orders API route (GET)
     - Fetch orders for authenticated user (buyer or seller) from Supabase
     - Filter by user role
     - Return orders with pagination
     - _Requirements: Order listing_
 
-  - [ ] 42.3 Implement /api/orders/[id] API route (GET)
+  - [x] 42.3 Implement /api/orders/[id] API route (GET)
     - Verify user is buyer or seller of the order
     - Fetch order from Supabase with listing and book data
     - Return order details
     - _Requirements: Order detail view_
 
-  - [ ] 42.4 Implement /api/orders/[id]/cancel API route (PUT)
+  - [x] 42.4 Implement /api/orders/[id]/cancel API route (PUT)
     - Verify user is buyer or seller
     - Check order status allows cancellation
     - Update order status to "cancelled" in Supabase
@@ -944,8 +944,8 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Update listing status back to "active" if not shipped
     - _Requirements: Order cancellation_
 
-- [ ] 43. Build frontend order components
-  - [ ] 43.1 Create OrderPage component
+- [x] 43. Build frontend order components
+  - [x] 43.1 Create OrderPage component
     - Display order summary
     - Show book details
     - Display pricing breakdown
@@ -955,19 +955,19 @@ The implementation focuses on building a complete marketplace with admin moderat
     - Add cancel order button (if applicable)
     - _Requirements: Order management_
 
-  - [ ] 43.2 Create MyOrdersPage component (buyer view)
+  - [x] 43.2 Create MyOrdersPage component (buyer view)
     - Fetch and display buyer's orders
     - Show order status, book details, tracking
     - Implement status filtering
     - _Requirements: Buyer order view_
 
-  - [ ] 43.3 Create SellerOrdersPage component (seller view)
+  - [x] 43.3 Create SellerOrdersPage component (seller view)
     - Fetch and display seller's orders
     - Show order status, buyer info, tracking
     - Display seller payout information
     - _Requirements: Seller order view_
 
-- [ ] 44. Checkpoint - Verify order processing system
+- [x] 44. Checkpoint - Verify order processing system
   - Test order creation flow end-to-end
   - Verify listing status updates atomically
   - Test concurrent order prevention
@@ -977,39 +977,39 @@ The implementation focuses on building a complete marketplace with admin moderat
 
 ### Phase 10: Supabase Realtime Updates
 
-- [ ] 45. Implement Supabase Realtime subscriptions
-  - [ ] 45.1 Create Realtime channel management
+- [x] 45. Implement Supabase Realtime subscriptions
+  - [x] 45.1 Create Realtime channel management
     - Set up Supabase Realtime channels for different event types
     - Configure channel authentication using RLS policies
     - Create channel subscription utilities
     - _Requirements: 8.1, 8.2, 8.3_
 
-  - [ ] 45.2 Implement message publishing functions
+  - [x] 45.2 Implement message publishing functions
     - Implement publishListingApproval function using Supabase Realtime
     - Implement publishOrderUpdate function using Supabase Realtime
     - Implement publishScanProgress function using Supabase Realtime
     - Broadcast messages to appropriate channels
     - _Requirements: 8.4, 8.5, 8.6, 3.10, 3.11_
 
-  - [ ] 45.3 Implement connection management
+  - [x] 45.3 Implement connection management
     - Handle connection drops with automatic reconnection
     - Implement exponential backoff for reconnection
     - Fetch missed updates on reconnection
     - _Requirements: 8.7, 8.8_
 
-  - [ ] 45.4 Write property test for real-time notification delivery
+  - [x] 45.4 Write property test for real-time notification delivery
     - **Property: Real-time Notification Delivery**
     - **Validates: Requirements 8.4, 3.10**
 
-- [ ] 46. Build frontend Supabase Realtime integration
-  - [ ] 46.1 Create Realtime client service
+- [-] 46. Build frontend Supabase Realtime integration
+  - [x] 46.1 Create Realtime client service
     - Initialize Supabase Realtime client
     - Implement connection with authentication
     - Handle connection events (connect, disconnect, error)
     - Implement automatic reconnection with exponential backoff
     - _Requirements: 8.1, 8.7_
 
-  - [ ] 46.2 Create notification subscription hooks
+  - [x] 46.2 Create notification subscription hooks
     - Create useListingNotifications hook
     - Create useOrderNotifications hook
     - Create useScanProgress hook
