@@ -25,6 +25,19 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface PendingListing {
+  id: string;
+  status: string;
+  final_price: number;
+  condition_score: number;
+  created_at: string;
+  images: string[] | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  book: { title: string; author: string } | null;
+  seller: { name: string; email: string } | null;
+}
 interface PlatformStats {
   total_books_listed: number;
   total_books_sold: number;
@@ -113,6 +126,78 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Moderation state
+  const [pendingListings, setPendingListings] = useState<PendingListing[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [moderating, setModerating] = useState<string | null>(null);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [moderationMsg, setModerationMsg] = useState<{ id: string; type: 'success' | 'error'; text: string } | null>(null);
+
+  const fetchPending = useCallback(async () => {
+    try {
+      const [r1, r2] = await Promise.all([
+        fetch('/api/admin/listings?status=pending_approval&pageSize=50'),
+        fetch('/api/admin/listings?status=rescan_required&pageSize=50'),
+      ]);
+      const [j1, j2] = await Promise.all([
+        r1.ok ? r1.json() : { data: [] },
+        r2.ok ? r2.json() : { data: [] },
+      ]);
+      const all = [...(j1.data ?? []), ...(j2.data ?? [])];
+      // Extra client-side guard — only show truly pending listings
+      const pending = all.filter(
+        (l: PendingListing) => l.status === 'pending_approval' || l.status === 'rescan_required'
+      );
+      setPendingListings(pending);
+    } catch (e) {
+      console.warn('fetchPending error:', e);
+    }
+  }, []);
+
+  const handleApprove = async (id: string) => {
+    setModerating(id);
+    try {
+      const res = await fetch(`/api/admin/listings/${id}/approve`, { method: 'PUT' });
+      if (res.ok) {
+        setPendingListings(p => p.filter(l => l.id !== id));
+        setModerationMsg({ id, type: 'success', text: 'Approved' });
+        fetchData();
+      } else {
+        const j = await res.json();
+        setModerationMsg({ id, type: 'error', text: j.error ?? 'Failed to approve' });
+      }
+    } finally {
+      setModerating(null);
+      setTimeout(() => setModerationMsg(null), 3000);
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    if (!rejectReason.trim()) return;
+    setModerating(id);
+    try {
+      const res = await fetch(`/api/admin/listings/${id}/reject`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: rejectReason }),
+      });
+      if (res.ok) {
+        setPendingListings(p => p.filter(l => l.id !== id));
+        setRejectId(null);
+        setRejectReason('');
+        setModerationMsg({ id, type: 'success', text: 'Rejected' });
+        fetchData();
+      } else {
+        const j = await res.json();
+        setModerationMsg({ id, type: 'error', text: j.error ?? 'Failed to reject' });
+      }
+    } finally {
+      setModerating(null);
+      setTimeout(() => setModerationMsg(null), 3000);
+    }
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -144,7 +229,8 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    fetchPending();
+  }, [fetchData, fetchPending]);
 
   if (loading) return <LoadingSpinner />;
 
@@ -238,6 +324,171 @@ export default function AdminDashboard() {
             color="bg-lime-100 text-lime-700"
           />
         </div>
+      </section>
+
+      {/* ── Pending Listings Moderation ── */}
+      <section>
+        <SectionHeader title={`Pending Approval (${pendingListings.length})`} />
+        {pendingListings.length === 0 ? (
+          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500 text-sm">
+            No listings pending approval.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pendingListings.map(listing => {
+              const book = listing.book;
+              const isBusy = moderating === listing.id;
+              const msg = moderationMsg?.id === listing.id ? moderationMsg : null;
+              const isExpanded = expandedId === listing.id;
+              const images = listing.images ?? [];
+              const imageLabels = ['Front Cover', 'Back Cover', 'Spine', 'Pages'];
+
+              return (
+                <div key={listing.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  {/* ── Collapsed row (always visible, clickable) ── */}
+                  <div
+                    className="flex gap-4 items-center p-4 cursor-pointer hover:bg-gray-50 transition-colors select-none"
+                    onClick={() => setExpandedId(isExpanded ? null : listing.id)}
+                  >
+                    {/* Thumbnail */}
+                    <div className="w-12 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
+                      {images[0] ? (
+                        <img src={images[0]} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-300">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Summary info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-900 text-sm truncate">{book?.title ?? 'Untitled'}</p>
+                      <p className="text-xs text-gray-500 truncate">{book?.author ?? ''}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Condition: {listing.condition_score}/5 · ₹{listing.final_price.toLocaleString('en-IN')}
+                        {listing.seller && <> · Seller: {listing.seller.name ?? listing.seller.email}</>}
+                      </p>
+                    </div>
+
+                    {/* Chevron */}
+                    <svg
+                      className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+
+                  {/* ── Expanded details ── */}
+                  {isExpanded && (
+                    <div className="border-t border-gray-100 p-4 space-y-4">
+                      {/* 4 images grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {imageLabels.map((label, i) => (
+                          <div key={label}>
+                            <p className="text-xs text-gray-500 mb-1 font-medium">{label}</p>
+                            <div className="aspect-[3/4] bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
+                              {images[i] ? (
+                                <img
+                                  src={images[i]}
+                                  alt={label}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">
+                                  No image
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Extra details */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-gray-600">
+                        <div><span className="text-gray-400 block">Price</span>₹{listing.final_price.toLocaleString('en-IN')}</div>
+                        <div><span className="text-gray-400 block">Condition</span>{listing.condition_score}/5</div>
+                        <div><span className="text-gray-400 block">Seller</span>{listing.seller?.name ?? listing.seller?.email ?? '—'}</div>
+                        <div><span className="text-gray-400 block">Submitted</span>{new Date(listing.created_at).toLocaleDateString('en-IN')}</div>
+                      </div>
+
+                      {/* Address */}
+                      {(listing.city || listing.state || listing.pincode) && (
+                        <div className="bg-gray-50 rounded-lg px-4 py-3 text-xs text-gray-600 flex items-start gap-2">
+                          <svg className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          <div>
+                            <span className="text-gray-400 block mb-0.5">Pickup Location</span>
+                            <span className="font-medium text-gray-700">
+                              {[listing.city, listing.state, listing.pincode].filter(Boolean).join(', ')}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Reject reason input */}
+                      {rejectId === listing.id && (
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={rejectReason}
+                            onChange={e => setRejectReason(e.target.value)}
+                            placeholder="Reason for rejection..."
+                            className="flex-1 text-xs border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400"
+                          />
+                          <button
+                            onClick={() => handleReject(listing.id)}
+                            disabled={isBusy || !rejectReason.trim()}
+                            className="text-xs px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                          >
+                            {isBusy ? '...' : 'Confirm'}
+                          </button>
+                          <button
+                            onClick={() => { setRejectId(null); setRejectReason(''); }}
+                            className="text-xs px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+
+                      {msg && (
+                        <p className={`text-xs font-medium ${msg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                          {msg.text}
+                        </p>
+                      )}
+
+                      {/* Action buttons */}
+                      {rejectId !== listing.id && (
+                        <div className="flex gap-3 pt-1">
+                          <button
+                            onClick={() => handleApprove(listing.id)}
+                            disabled={isBusy}
+                            className="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+                          >
+                            {isBusy ? 'Approving...' : 'Approve'}
+                          </button>
+                          <button
+                            onClick={() => { setRejectId(listing.id); setRejectReason(''); }}
+                            disabled={isBusy}
+                            className="px-4 py-2 text-sm font-semibold border border-red-300 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* ── Charts ── */}

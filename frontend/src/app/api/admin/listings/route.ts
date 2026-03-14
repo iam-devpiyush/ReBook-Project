@@ -9,7 +9,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
 import { createClient } from '@supabase/supabase-js';
-import { ADMIN_LISTING_PROJECTION } from '@/lib/supabase/projections';
 
 function createAdminClient() {
   return createClient(
@@ -63,10 +62,15 @@ export async function GET(request: NextRequest) {
     // Create Supabase client
     const supabase = createAdminClient();
 
-    // Build query — use projection to fetch only required fields (Requirement 22.1)
+    // Build query — fetch listings with status filter
     let query = supabase
       .from('listings')
-      .select(ADMIN_LISTING_PROJECTION, { count: 'exact' });
+      .select(`
+        id, condition_score, final_price, status, images, created_at,
+        city, state, pincode,
+        book:books(id, title, author, isbn, cover_image),
+        seller_id
+      `, { count: 'exact' });
 
     // Apply status filter if provided
     if (status) {
@@ -105,6 +109,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Fetch seller info separately to avoid join issues
+    const sellerIds = [...new Set((listings ?? []).map((l: any) => l.seller_id).filter(Boolean))];
+    let sellerMap: Record<string, { id: string; name: string; email: string }> = {};
+    if (sellerIds.length > 0) {
+      const { data: sellers } = await supabase
+        .from('users')
+        .select('id, name, email')
+        .in('id', sellerIds);
+      (sellers ?? []).forEach((s: any) => { sellerMap[s.id] = s; });
+    }
+
+    const enriched = (listings ?? []).map((l: any) => ({
+      ...l,
+      seller: sellerMap[l.seller_id] ?? null,
+    }));
+
+    console.log(`Admin listings fetch: status=${status ?? 'all'}, count=${count}, returned=${enriched.length}`);
     // Calculate pagination metadata
     const totalPages = count ? Math.ceil(count / pageSize) : 0;
     const hasNextPage = page < totalPages;
@@ -112,7 +133,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: listings || [],
+      data: enriched,
       pagination: {
         page,
         pageSize,

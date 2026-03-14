@@ -5,15 +5,33 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/useAuth';
 import { useCart } from '@/lib/cart/CartContext';
+import { createClient } from '@/lib/supabase/client';
 
 export default function Navbar() {
     const { user, loading, signOut } = useAuth();
     const { count, setOpen: setCartOpen } = useCart();
     const [dropdownOpen, setDropdownOpen] = useState(false);
+    const [signingOut, setSigningOut] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
 
-    // Close dropdown on outside click
+    // Fetch role from public.users table
+    useEffect(() => {
+        if (!user) { setIsAdmin(false); return; }
+        // Quick check via email as fallback
+        if (user.email === 'admin@rebook.demo') { setIsAdmin(true); return; }
+        const supabase = createClient();
+        supabase
+            .from('users')
+            .select('role')
+            .eq('id', user.id)
+            .single()
+            .then(({ data, error }) => {
+                if (error) console.warn('Navbar role fetch error:', error.message);
+                setIsAdmin(data?.role === 'admin');
+            });
+    }, [user]);
     useEffect(() => {
         function handleClick(e: MouseEvent) {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -26,7 +44,12 @@ export default function Navbar() {
 
     const handleSignOut = async () => {
         setDropdownOpen(false);
-        await signOut();
+        setSigningOut(true);
+        try {
+            await signOut();
+        } finally {
+            setSigningOut(false);
+        }
         router.push('/');
     };
 
@@ -35,9 +58,6 @@ export default function Navbar() {
         ? name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()
         : '?';
 
-    // Check if admin
-    const isAdmin = user?.user_metadata?.role === 'admin' ||
-        (user as any)?.app_metadata?.role === 'admin';
 
     return (
         <nav className="bg-white border-b border-gray-100 sticky top-0 z-50 shadow-sm">
@@ -67,6 +87,11 @@ export default function Navbar() {
                         <Link href="/" className="text-sm font-medium text-gray-600 hover:text-green-600 transition-colors">
                             Home
                         </Link>
+                        {user && isAdmin && (
+                            <Link href="/admin" className="text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-colors">
+                                Admin
+                            </Link>
+                        )}
                     </div>
 
                     {/* Right side */}
@@ -159,12 +184,13 @@ export default function Navbar() {
                                             <div className="border-t border-gray-100 mt-1">
                                                 <button
                                                     onClick={handleSignOut}
-                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                                    disabled={signingOut}
+                                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
                                                 >
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                                                     </svg>
-                                                    Sign Out
+                                                    {signingOut ? 'Signing out...' : 'Sign Out'}
                                                 </button>
                                             </div>
                                         </div>
