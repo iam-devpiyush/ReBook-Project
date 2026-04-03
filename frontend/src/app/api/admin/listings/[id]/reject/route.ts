@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
 import { createClient } from '@supabase/supabase-js';
+import { MeiliSearch } from 'meilisearch';
 
 function createAdminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
+}
+
+function getMeiliClient() {
+  return new MeiliSearch({
+    host: process.env.MEILISEARCH_HOST || 'http://localhost:7700',
+    apiKey: process.env.MEILISEARCH_API_KEY || '',
+  });
 }
 
 export async function PUT(
@@ -73,13 +81,26 @@ export async function PUT(
       return NextResponse.json({ error: 'Failed to reject listing' }, { status: 500 });
     }
 
-    await supabase.from('moderation_logs').insert({
-      admin_id: user.id,
-      action: 'reject_listing',
-      target_type: 'listing',
-      target_id: listingId,
-      reason: body.reason.trim(),
-    }).catch((e: unknown) => console.error('Moderation log failed:', e));
+    try {
+      await supabase.from('moderation_logs').insert({
+        admin_id: user.id,
+        action: 'reject_listing',
+        target_type: 'listing',
+        target_id: listingId,
+        reason: body.reason.trim(),
+      });
+    } catch (e) {
+      console.error('Moderation log failed:', e);
+    }
+
+    // Remove from Meilisearch index (non-fatal)
+    try {
+      const meili = getMeiliClient();
+      await meili.index('listings').deleteDocument(listingId);
+      console.info(`[reject] Removed listing ${listingId} from Meilisearch`);
+    } catch (indexErr) {
+      console.error('[reject] Meilisearch removal failed (non-fatal):', indexErr);
+    }
 
     return NextResponse.json({ success: true, data: updated, message: 'Listing rejected successfully' });
   } catch (error) {

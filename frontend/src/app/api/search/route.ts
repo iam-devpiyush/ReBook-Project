@@ -11,7 +11,6 @@ import { MeiliSearch } from 'meilisearch';
 import type { SearchFilters, SortBy, ListingDocument } from '@/services/search.service';
 import { applyRateLimit, getClientIp, SEARCH_RATE_LIMIT } from '@/lib/rate-limit';
 import { withMeilisearchFallback } from '@/lib/errors/graceful-degradation';
-import { createServerClient } from '@/lib/supabase/server';
 import { appCache, TTL, buildCacheKey } from '@/lib/cache';
 import { measurePerf, addTimingHeader } from '@/lib/monitoring/performance';
 
@@ -76,9 +75,6 @@ async function searchListings(options: {
 
   return { hits, estimatedTotalHits: result.estimatedTotalHits ?? 0, processingTimeMs: result.processingTimeMs };
 }
-
-/** In-memory cache for popular queries — delegated to shared appCache (5-minute TTL, Requirement 22.7) */
-export const SEARCH_CACHE_TTL_MS = TTL.SEARCH;
 
 /** Build a deterministic cache key from request params */
 function buildSearchCacheKey(params: URLSearchParams): string {

@@ -71,13 +71,17 @@ export async function PUT(
       return NextResponse.json({ error: 'Failed to request rescan' }, { status: 500 });
     }
 
-    await supabase.from('moderation_logs').insert({
-      admin_id: user.id,
-      action: 'request_rescan',
-      target_type: 'listing',
-      target_id: listingId,
-      notes: body.notes?.trim() || null,
-    }).catch((e: unknown) => console.error('Moderation log failed:', e));
+    try {
+      await supabase.from('moderation_logs').insert({
+        admin_id: user.id,
+        action: 'request_rescan',
+        target_type: 'listing',
+        target_id: listingId,
+        notes: body.notes?.trim() || null,
+      });
+    } catch (e) {
+      console.error('Moderation log failed:', e);
+    }
 
     return NextResponse.json({ success: true, data: updated, message: 'Rescan requested successfully' });
   } catch (error) {

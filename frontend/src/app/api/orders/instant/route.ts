@@ -57,16 +57,9 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'You cannot buy your own listing' }, { status: 403 });
         }
 
-        // 2. Atomically mark listing as sold (optimistic lock)
-        const { error: soldErr } = await db
-            .from('listings')
-            .update({ status: 'sold', updated_at: new Date().toISOString() })
-            .eq('id', listing_id)
-            .eq('status', 'active');
-
-        if (soldErr) {
-            return NextResponse.json({ error: 'Listing was just purchased by someone else' }, { status: 409 });
-        }
+        // 2. The DB trigger `validate_order_on_insert` atomically checks the listing
+        // is active and marks it sold — no need to do it here first.
+        // (Doing it here first would cause the trigger to see status='sold' and reject.)
 
         const now = new Date().toISOString();
 
@@ -102,10 +95,13 @@ export async function POST(request: NextRequest) {
             .single();
 
         if (orderErr || !order) {
-            // Rollback listing
-            await db.from('listings').update({ status: 'active', updated_at: now }).eq('id', listing_id);
-            console.error('Order insert error:', JSON.stringify(orderErr));
-            return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
+            const detail = `${orderErr?.message ?? 'unknown'} [code: ${orderErr?.code ?? ''}, detail: ${orderErr?.details ?? ''}, hint: ${orderErr?.hint ?? ''}]`;
+            console.error('Order insert error:', detail);
+            // If the error is the trigger's "not available" exception, return 409
+            if (orderErr?.message?.includes('not available') || orderErr?.code === 'P0001') {
+                return NextResponse.json({ error: 'Listing is no longer available — it may have just been purchased' }, { status: 409 });
+            }
+            return NextResponse.json({ error: `Failed to create order: ${detail}` }, { status: 500 });
         }
 
         // 4. Update seller stats (books_sold, eco impact) — non-fatal

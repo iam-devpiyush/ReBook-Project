@@ -53,21 +53,7 @@ interface PlatformStats {
  * In-memory cache for platform stats — delegated to shared appCache
  * Cache duration: 15 minutes (Requirement 16.4)
  */
-export const CACHE_DURATION_MS = TTL.PLATFORM_STATS;
 const STATS_CACHE_KEY = 'platform_stats';
-
-/**
- * Reset the stats cache (used for testing)
- */
-export function resetStatsCache(): void {
-  appCache.invalidate(STATS_CACHE_KEY);
-}
-
-// Keep legacy export for backward compatibility with existing tests
-export let statsCache: { data: PlatformStats | null; timestamp: number } = {
-  data: null,
-  timestamp: 0,
-};
 
 /**
  * GET /api/admin/stats
@@ -258,8 +244,6 @@ export async function GET(request: NextRequest) {
 
     // Update shared cache (15-minute TTL — Requirement 16.4)
     appCache.set(STATS_CACHE_KEY, stats, TTL.PLATFORM_STATS);
-    // Keep legacy statsCache in sync for backward compatibility
-    statsCache = { data: stats, timestamp: Date.now() };
 
     return NextResponse.json({
       success: true,

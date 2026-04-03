@@ -18,18 +18,19 @@ const securityHeaders = [
   // Permissions policy — disable unused browser features
   {
     key: 'Permissions-Policy',
-    value: 'camera=(self), microphone=(), geolocation=(self), payment=()',
+    value: 'camera=(self), microphone=(), geolocation=(self), payment=(self "https://checkout.razorpay.com")',
   },
   // Content Security Policy (Requirement 17.9 — prevent XSS)
   {
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // unsafe-eval needed by Next.js dev
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://checkout.razorpay.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
-      "font-src 'self'",
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.meilisearch.com",
+      "font-src 'self' data:",
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.meilisearch.io https://api.meilisearch.com https://api.razorpay.com https://lumberjack.razorpay.com",
+      "frame-src https://api.razorpay.com https://checkout.razorpay.com",
       "frame-ancestors 'none'",
     ].join('; '),
   },
@@ -42,7 +43,9 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ['sharp'],
+  experimental: {
+    serverComponentsExternalPackages: ['sharp'],
+  },
   images: {
     // Allow Next.js Image component to serve from Supabase Storage CDN (Requirement 21.3)
     remotePatterns: [
@@ -55,6 +58,11 @@ const nextConfig = {
         protocol: 'https',
         hostname: '*.supabase.co',
         pathname: '/storage/v1/object/sign/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'books.google.com',
+        pathname: '/books/content**',
       },
     ],
     // Keep legacy domains for local dev

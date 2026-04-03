@@ -30,7 +30,7 @@ function buildSrcSet(src: string): string {
     if (!src.startsWith('http')) return src;
     try {
         const url = new URL(src);
-        const path = url.pathname;
+        void url; // parsed for validation only
         // Supabase Storage: /storage/v1/object/public/book-images/<filename>
         // We serve thumbnail (200w), medium (600w), full (1200w)
         const base = src.split('?')[0];

@@ -9,7 +9,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
 import { createClient } from '@supabase/supabase-js';
-import { wouldCreateCycle } from '@/app/api/categories/route';
 
 function createAdminClient() {
   return createClient(

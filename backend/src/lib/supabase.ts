@@ -5,14 +5,17 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { logger } from '../utils/logger';
 
-const supabaseUrl = process.env.SUPABASE_URL;
+const logger = {
+  error: (msg: string, ...args: unknown[]) => console.error('[supabase]', msg, ...args),
+};
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceKey) {
   logger.error('Missing Supabase configuration');
-  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set');
+  throw new Error('SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY must be set');
 }
 
 /**

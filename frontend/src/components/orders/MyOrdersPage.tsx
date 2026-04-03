@@ -54,7 +54,7 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export default function MyOrdersPage({ onViewOrder }: MyOrdersPageProps) {
+export default function MyOrdersPage({ onViewOrder: _onViewOrder }: MyOrdersPageProps) {
   const [orders, setOrders] = useState<BuyerOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabFilter>('all');

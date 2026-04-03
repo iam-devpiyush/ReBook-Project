@@ -15,7 +15,7 @@ export async function GET() {
         const supabase = createServerClient();
 
         // Try platform_stats first (populated by DB triggers)
-        const { data: stats } = await supabase
+        const { data: stats } = await (supabase as any)
             .from('platform_stats')
             .select('trees_saved, water_saved_liters, co2_reduced_kg, total_books_sold');
 
@@ -24,12 +24,12 @@ export async function GET() {
         let co2_reduced_kg = 0;
         let total_books_sold = 0;
 
-        const hasStats = stats && stats.some(
+        const hasStats = stats && (stats as any[]).some(
             (r) => Number(r.trees_saved) > 0 || Number(r.total_books_sold) > 0
         );
 
         if (hasStats) {
-            for (const row of stats!) {
+            for (const row of stats as any[]) {
                 trees_saved += Number(row.trees_saved ?? 0);
                 water_saved_liters += Number(row.water_saved_liters ?? 0);
                 co2_reduced_kg += Number(row.co2_reduced_kg ?? 0);

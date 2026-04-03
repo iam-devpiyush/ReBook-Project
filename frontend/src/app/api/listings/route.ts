@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const rateLimitResponse = applyRateLimit(request, `listing-create:${user.id}`, LISTING_CREATION_RATE_LIMIT);
     if (rateLimitResponse) return rateLimitResponse;
 
-    const body: CreateListingRequest = await request.json();
+    const body: CreateListingRequest & { scan_id?: string } = await request.json();
     const validationResult = createListingSchema.safeParse(body);
 
     if (!validationResult.success) {
@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
     const validatedData = validationResult.data;
+    const scanId = body.scan_id ?? null;
     const adminSupabase = createAdminClient();
 
     // 1. Upload data: URL images to Storage
@@ -169,6 +170,15 @@ export async function POST(request: NextRequest) {
         { error: `Failed to create listing: ${listingError?.message ?? 'unknown'} [code: ${listingError?.code ?? ''}, detail: ${listingError?.details ?? ''}]` },
         { status: 500 }
       );
+    }
+
+    // 5. Link the AI scan to the new listing (Requirement 8.6)
+    if (scanId) {
+      await adminSupabase
+        .from('ai_scans')
+        .update({ listing_id: listing.id })
+        .eq('id', scanId)
+        .eq('user_id', user.id);
     }
 
     return NextResponse.json(

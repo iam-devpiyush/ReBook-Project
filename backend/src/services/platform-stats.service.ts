@@ -11,7 +11,12 @@
  */
 
 import { supabase } from '../lib/supabase';
-import { logger } from '../utils/logger';
+
+const logger = {
+  info: (msg: string, ...args: unknown[]) => console.info('[platform-stats]', msg, ...args),
+  error: (msg: string, ...args: unknown[]) => console.error('[platform-stats]', msg, ...args),
+  warn: (msg: string, ...args: unknown[]) => console.warn('[platform-stats]', msg, ...args),
+};
 
 export interface PlatformStats {
   date: string;

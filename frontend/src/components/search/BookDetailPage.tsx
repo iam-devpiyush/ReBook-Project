@@ -24,16 +24,15 @@ const CONDITION_LABELS: Record<number, { label: string; color: string }> = {
   1: { label: 'Poor', color: 'bg-red-100 text-red-700' },
 };
 
-export default function BookDetailPage({ listingId, onPlaceOrder, onAddToWishlist }: BookDetailPageProps) {
+export default function BookDetailPage({ listingId, onPlaceOrder: _onPlaceOrder, onAddToWishlist }: BookDetailPageProps) {
   const { addItem, isInCart } = useCart();
   const [listing, setListing] = useState<ListingWithBook | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeImage, setActiveImage] = useState(0);
   const [wishlistAdded, setWishlistAdded] = useState(false);
-  const [ordering, setOrdering] = useState(false);
-  const [orderSuccess, setOrderSuccess] = useState<EcoImpact | null>(null);
-  const [orderError, setOrderError] = useState<string | null>(null);
+  const [orderSuccess] = useState<EcoImpact | null>(null);
+  const [orderError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -47,28 +46,6 @@ export default function BookDetailPage({ listingId, onPlaceOrder, onAddToWishlis
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load listing'))
       .finally(() => setLoading(false));
   }, [listingId]);
-
-  const handlePlaceOrder = async () => {
-    if (!listing) return;
-    setOrdering(true);
-    setOrderError(null);
-    try {
-      const res = await fetch('/api/orders/instant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ listing_id: listing.id }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to place order');
-      setOrderSuccess(data.data.eco_impact);
-      setListing(prev => prev ? { ...prev, status: 'sold' } : prev);
-      onPlaceOrder?.(listing);
-    } catch (err) {
-      setOrderError(err instanceof Error ? err.message : 'Failed to place order');
-    } finally {
-      setOrdering(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -96,10 +73,16 @@ export default function BookDetailPage({ listingId, onPlaceOrder, onAddToWishlis
   }
 
   const images = listing.images ?? [];
+  // images[0] is the official cover from Google Books
+  // images[1..] are the user's actual photos
+  const officialCover = images[0] ?? null;
+  const userPhotos = images.slice(1);
   const condition = CONDITION_LABELS[listing.condition_score] ?? { label: `Score ${listing.condition_score}`, color: 'bg-gray-100 text-gray-600' };
   const treesPerBook = (1 / 30).toFixed(3);
-  const estimatedOriginal = Math.round(listing.final_price * 1.4);
-  const savePct = Math.round((1 - listing.final_price / estimatedOriginal) * 100);
+  const originalPrice = (listing as any).original_price as number | undefined;
+  const savePct = originalPrice && originalPrice > listing.final_price
+    ? Math.round((1 - listing.final_price / originalPrice) * 100)
+    : null;
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -129,11 +112,11 @@ export default function BookDetailPage({ listingId, onPlaceOrder, onAddToWishlis
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Image */}
+        {/* Image — official cover */}
         <div>
           <div className="aspect-[3/4] bg-gray-100 rounded-2xl overflow-hidden border border-gray-200">
-            {images[activeImage] ? (
-              <img src={images[activeImage]} alt={listing.book.title} className="w-full h-full object-contain" />
+            {officialCover ? (
+              <img src={officialCover} alt={listing.book.title} className="w-full h-full object-contain" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-300">
                 <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -143,14 +126,24 @@ export default function BookDetailPage({ listingId, onPlaceOrder, onAddToWishlis
               </div>
             )}
           </div>
-          {images.length > 1 && (
-            <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
-              {images.map((img, i) => (
-                <button key={i} onClick={() => setActiveImage(i)}
-                  className={`flex-shrink-0 w-16 h-20 rounded-lg overflow-hidden border-2 transition-colors ${i === activeImage ? 'border-green-500' : 'border-gray-200 hover:border-gray-400'}`}>
-                  <img src={img} alt="" className="w-full h-full object-cover" />
-                </button>
-              ))}
+
+          {/* User-uploaded condition photos */}
+          {userPhotos.length > 0 && (
+            <div className="mt-4">
+              <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Actual condition photos</p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {userPhotos.map((img, i) => (
+                  <button key={i} onClick={() => setActiveImage(i + 1)}
+                    className={`flex-shrink-0 w-16 h-20 rounded-lg overflow-hidden border-2 transition-colors ${activeImage === i + 1 ? 'border-green-500' : 'border-gray-200 hover:border-gray-400'}`}>
+                    <img src={img} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+              {activeImage > 0 && (
+                <div className="mt-3 rounded-xl overflow-hidden border border-gray-200">
+                  <img src={images[activeImage]} alt="Condition photo" className="w-full max-h-64 object-contain bg-gray-50" />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -180,12 +173,18 @@ export default function BookDetailPage({ listingId, onPlaceOrder, onAddToWishlis
             <span className="text-3xl font-extrabold text-gray-900">
               ₹{listing.final_price.toLocaleString('en-IN')}
             </span>
-            <span className="text-lg text-gray-400 line-through">
-              ₹{estimatedOriginal.toLocaleString('en-IN')}
-            </span>
-            <span className="text-sm font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-              Save {savePct}%
-            </span>
+            {originalPrice && originalPrice > listing.final_price && (
+              <>
+                <span className="text-lg text-gray-400 line-through">
+                  ₹{originalPrice.toLocaleString('en-IN')}
+                </span>
+                {savePct && (
+                  <span className="text-sm font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                    Save {savePct}%
+                  </span>
+                )}
+              </>
+            )}
           </div>
 
           {/* Eco line */}
@@ -258,10 +257,10 @@ export default function BookDetailPage({ listingId, onPlaceOrder, onAddToWishlis
                   <td className="px-4 py-2.5 font-medium text-gray-600">Condition Score</td>
                   <td className="px-4 py-2.5 text-gray-900">{listing.condition_score}/5</td>
                 </tr>
-                {listing.damage_notes && (
+                {(listing as any).damage_notes && (
                   <tr>
                     <td className="px-4 py-2.5 font-medium text-gray-600">Damage Notes</td>
-                    <td className="px-4 py-2.5 text-gray-900">{listing.damage_notes}</td>
+                    <td className="px-4 py-2.5 text-gray-900">{(listing as any).damage_notes}</td>
                   </tr>
                 )}
               </tbody>

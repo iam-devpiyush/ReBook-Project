@@ -11,7 +11,12 @@
  */
 
 import { supabase } from '../lib/supabase';
-import { logger } from '../utils/logger';
+
+const logger = {
+  info: (msg: string, ...args: unknown[]) => console.info('[admin-approval]', msg, ...args),
+  error: (msg: string, ...args: unknown[]) => console.error('[admin-approval]', msg, ...args),
+  warn: (msg: string, ...args: unknown[]) => console.warn('[admin-approval]', msg, ...args),
+};
 import {
   addToMeilisearchIndex,
   removeFromMeilisearchIndex,

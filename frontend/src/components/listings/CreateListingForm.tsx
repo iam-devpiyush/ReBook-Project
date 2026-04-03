@@ -1,679 +1,576 @@
-/**
- * CreateListingForm Component
- * 
- * Multi-step form for creating book listings:
- * - Step 1: Use EnhancedAIScannerComponent for image capture
- * - Step 2: Display auto-filled book details (or manual entry if ISBN not detected)
- * - Step 3: Review condition score and pricing breakdown
- * - Step 4: Confirm and submit listing
- * 
- * Uses react-hook-form for form state management and Zod for validation.
- * 
- * Requirements: 2.1-2.12
- */
-
 'use client';
 
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+/**
+ * CreateListingForm
+ *
+ * Step 1 — Guided image upload (front cover → back cover → spine → pages)
+ * Step 2 — AI scans: extracts all book data, condition score, price
+ * Step 3 — Show read-only AI results + user fills ONLY: category, description, location
+ * Step 4 — Pricing breakdown + confirm & submit
+ *
+ * Users cannot edit AI-extracted fields (title, author, ISBN, price, condition).
+ */
+
+import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import EnhancedAIScanner from '@/components/ai-scanner/EnhancedAIScanner';
+import BookImageUploader, { type UploadedImages } from '@/components/ai-scanner/BookImageUploader';
 import ConditionBadge from './ConditionBadge';
 import PricingBreakdownDisplay from './PricingBreakdownDisplay';
-import { createListingSchema } from '@/lib/validation/listing';
-import type { CreateListingRequest } from '@/types/listing';
 import type { PricingBreakdown } from '@/types/pricing';
 import type { BookMetadata } from '@/lib/ai-scanner/metadata-fetcher';
 import type { ConditionAnalysis } from '@/lib/ai-scanner/condition-analyzer';
-
-// ============================================================================
-// Type Definitions
-// ============================================================================
-
-type ImageType = 'front_cover' | 'back_cover' | 'spine' | 'pages';
 
 interface ScanResult {
   detected_isbn: string | null;
   book_metadata: BookMetadata | null;
   condition_analysis: ConditionAnalysis;
+  original_price: number | null;
+  price_source: string | null;
+  official_cover_image: string | null;
 }
 
-type FormData = z.infer<typeof createListingSchema>;
+// Fields the user must provide manually
+interface ManualFields {
+  category_id: string;
+  description: string;
+  city: string;
+  state: string;
+  pincode: string;
+}
 
-// ============================================================================
-// Component
-// ============================================================================
+const CATEGORIES = [
+  'Fiction', 'Non-Fiction', 'Textbook', 'Science', 'Technology',
+  'History', 'Biography', 'Children', 'Engineering', 'Medical',
+  'Mathematics', 'Commerce', 'Arts', 'Other',
+];
 
 export default function CreateListingForm() {
   const router = useRouter();
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [uploadedImages, setUploadedImages] = useState<UploadedImages | null>(null);
+  const [scanId, setScanId] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
-  const [imageUrls, setImageUrls] = useState<Record<ImageType, string> | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [pricingBreakdown, setPricingBreakdown] = useState<PricingBreakdown | null>(null);
-  const [isCalculatingPricing, setIsCalculatingPricing] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [calculatingPrice, setCalculatingPrice] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  // Form setup with react-hook-form and Zod validation
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    setValue,
-    watch,
-    getValues,
-  } = useForm<FormData>({
-    resolver: zodResolver(createListingSchema),
-    mode: 'onChange',
+  const [manual, setManual] = useState<ManualFields>({
+    category_id: '',
+    description: '',
+    city: '',
+    state: '',
+    pincode: '',
   });
+  const [manualErrors, setManualErrors] = useState<Partial<ManualFields>>({});
 
-  const watchedOriginalPrice = watch('original_price');
-  const watchedConditionScore = watch('condition_score');
-  const watchedLocation = watch('location');
+  // ── Step 1 → 2: images collected, upload then scan ──────────────────────
 
-  // ============================================================================
-  // Step 1: AI Scanner Complete Handler
-  // ============================================================================
+  const handleImagesComplete = useCallback(async (images: UploadedImages) => {
+    setUploadedImages(images);
+    setScanning(true);
+    setScanError(null);
+    setUploadProgress(null);
+    setStep(2);
 
-  const handleScanComplete = (result: ScanResult, urls: Record<ImageType, string>) => {
-    setScanResult(result);
-    setImageUrls(urls);
+    try {
+      const scanId = crypto.randomUUID();
+      setScanId(scanId);
 
-    // Auto-fill form with scan results
-    if (result.book_metadata) {
-      setValue('title', result.book_metadata.title);
-      setValue('author', result.book_metadata.author);
-      if (result.book_metadata.publisher) {
-        setValue('publisher', result.book_metadata.publisher);
-      }
-      if (result.book_metadata.edition) {
-        setValue('edition', result.book_metadata.edition);
-      }
-      if (result.book_metadata.publication_year) {
-        setValue('publication_year', result.book_metadata.publication_year);
-      }
+      // ── Phase 1: upload images to Supabase Storage ──────────────────────
+      setUploadProgress({ done: 0, total: 4 });
+
+      const uploadRes = await fetch('/api/ai/upload-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scan_id: scanId, images }),
+      });
+      const uploadJson = await uploadRes.json();
+      if (!uploadRes.ok) throw new Error(uploadJson.error || 'Image upload failed');
+
+      const publicUrls: Record<string, string> = uploadJson.public_urls;
+      setUploadProgress({ done: 4, total: 4 });
+
+      // ── Phase 2: run AI scan with public URLs ────────────────────────────
+      setUploadProgress(null);
+
+      const res = await fetch('/api/ai/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images: publicUrls, scan_id: scanId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Scan failed');
+
+      setScanResult({
+        detected_isbn: json.result.detected_isbn,
+        book_metadata: json.result.book_metadata,
+        condition_analysis: json.result.condition_analysis,
+        original_price: json.result.original_price ?? json.result.book_metadata?.original_price ?? null,
+        price_source: json.result.price_source ?? json.result.book_metadata?.price_source ?? null,
+        official_cover_image: json.result.official_cover_image ?? json.result.book_metadata?.cover_image ?? null,
+      });
+    } catch (err: any) {
+      setScanError(err.message || 'Scan failed. Please try again.');
+    } finally {
+      setScanning(false);
+      setUploadProgress(null);
     }
+  }, []);
 
-    if (result.detected_isbn) {
-      setValue('isbn', result.detected_isbn);
-    }
+  // ── Step 3 validation ────────────────────────────────────────────────────
 
-    // Set condition score from AI analysis
-    setValue('condition_score', result.condition_analysis.overall_score);
-
-    // Set condition details
-    setValue('condition_details', {
-      cover_damage: result.condition_analysis.cover_damage,
-      page_quality: result.condition_analysis.page_quality,
-      binding_quality: result.condition_analysis.binding_quality,
-      markings: result.condition_analysis.markings || undefined,
-      discoloration: result.condition_analysis.discoloration || undefined,
-      notes: result.condition_analysis.notes || undefined,
-    });
-
-    // Set image URLs
-    const imageArray = [
-      urls.front_cover,
-      urls.back_cover,
-      urls.spine,
-      urls.pages,
-    ];
-    setValue('images', imageArray);
-
-    // Move to step 2
-    setCurrentStep(2);
+  const validateManual = (): boolean => {
+    const errs: Partial<ManualFields> = {};
+    if (!manual.category_id) errs.category_id = 'Required';
+    if (!manual.city.trim()) errs.city = 'Required';
+    if (!manual.state.trim()) errs.state = 'Required';
+    if (!/^\d{6}$/.test(manual.pincode)) errs.pincode = 'Must be 6 digits';
+    setManualErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
-  // ============================================================================
-  // Step 2: Calculate Pricing
-  // ============================================================================
+  // ── Step 3 → 4: calculate pricing ───────────────────────────────────────
 
   const handleCalculatePricing = async () => {
-    const formData = getValues();
-
-    // Validate required fields
-    if (!formData.original_price || !formData.condition_score || !formData.location) {
-      setError('Please fill in all required fields');
+    if (!validateManual()) return;
+    if (!scanResult?.original_price) {
+      setFormError('Could not determine the original price. Please rescan with a clearer back cover, or try a book with a visible ISBN barcode.');
       return;
     }
-
-    setIsCalculatingPricing(true);
-    setError(null);
-
+    setCalculatingPrice(true);
+    setFormError(null);
     try {
-      // Call pricing API
-      const response = await fetch('/api/pricing/calculate', {
+      const location = { city: manual.city, state: manual.state, pincode: manual.pincode };
+      const res = await fetch('/api/pricing/calculate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          original_price: formData.original_price,
-          condition_score: formData.condition_score,
-          seller_location: formData.location,
-          buyer_location: formData.location, // Use seller location as default for estimation
-          weight: 0.5, // Default book weight
+          original_price: scanResult.original_price,
+          condition_score: scanResult.condition_analysis.overall_score,
+          seller_location: location,
+          buyer_location: location,
+          weight: 0.5,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to calculate pricing');
-      }
-
-      const data = await response.json();
-      setPricingBreakdown(data.data);
-
-      // Set pricing fields in form
-      setValue('final_price', data.data.final_price);
-      setValue('delivery_cost', data.data.delivery_cost);
-      setValue('platform_commission', data.data.platform_commission);
-      setValue('payment_fees', data.data.payment_fees);
-      setValue('seller_payout', data.data.seller_payout);
-
-      // Move to step 3
-      setCurrentStep(3);
-    } catch (err) {
-      console.error('Pricing calculation error:', err);
-      setError('Failed to calculate pricing. Please try again.');
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Pricing failed');
+      setPricingBreakdown(json.data);
+      setStep(4);
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to calculate pricing.');
     } finally {
-      setIsCalculatingPricing(false);
+      setCalculatingPrice(false);
     }
   };
 
-  // ============================================================================
-  // Step 4: Submit Listing
-  // ============================================================================
+  // ── Step 4: submit ───────────────────────────────────────────────────────
 
-  const onSubmit = async (data: FormData) => {
-    setIsSubmitting(true);
-    setError(null);
+  const handleSubmit = async () => {
+    if (!scanResult || !pricingBreakdown || !uploadedImages) return;
+    setSubmitting(true);
+    setFormError(null);
 
-    // Ensure title/author are never empty strings
-    if (!data.title || !data.title.trim()) data.title = 'Unknown Title';
-    if (!data.author || !data.author.trim()) data.author = 'Unknown Author';
+    const meta = scanResult.book_metadata;
+    // Official cover image goes first — used as catalogue thumbnail
+    // User's actual photos follow for condition verification
+    const officialCover = scanResult.official_cover_image;
+    const userPhotos = [
+      uploadedImages.front_cover,
+      uploadedImages.back_cover,
+      uploadedImages.spine,
+      uploadedImages.pages,
+    ];
+    const listingImages = officialCover ? [officialCover, ...userPhotos] : userPhotos;
+
+    const payload = {
+      isbn: scanResult.detected_isbn || undefined,
+      title: meta?.title || 'Unknown Title',
+      author: meta?.author || 'Unknown Author',
+      publisher: meta?.publisher || undefined,
+      edition: meta?.edition || undefined,
+      publication_year: meta?.publication_year || undefined,
+      category_id: manual.category_id,
+      subject: meta?.subject || undefined,
+      description: manual.description || undefined,
+      original_price: scanResult.original_price!,
+      condition_score: scanResult.condition_analysis.overall_score,
+      condition_details: {
+        cover_damage: scanResult.condition_analysis.cover_damage,
+        page_quality: scanResult.condition_analysis.page_quality,
+        binding_quality: scanResult.condition_analysis.binding_quality,
+        markings: scanResult.condition_analysis.markings,
+        discoloration: scanResult.condition_analysis.discoloration,
+        notes: scanResult.condition_analysis.notes,
+      },
+      images: listingImages,
+      location: {
+        city: manual.city,
+        state: manual.state,
+        pincode: manual.pincode,
+      },
+      final_price: pricingBreakdown.final_price,
+      delivery_cost: pricingBreakdown.delivery_cost,
+      platform_commission: pricingBreakdown.platform_commission,
+      payment_fees: pricingBreakdown.payment_fees,
+      seller_payout: pricingBreakdown.seller_payout,
+      scan_id: scanId ?? undefined,
+    };
 
     try {
-      const response = await fetch('/api/listings', {
+      const res = await fetch('/api/listings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create listing');
-      }
-
-      const result = await response.json();
-
-      // Redirect to seller portal
-      router.push(`/seller`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to create listing');
+      router.push('/seller');
     } catch (err: any) {
-      console.error('Listing submission error:', err);
-      setError(err.message || 'Failed to create listing. Please try again.');
-      setIsSubmitting(false);
+      setFormError(err.message || 'Failed to create listing.');
+      setSubmitting(false);
     }
   };
 
-  // ============================================================================
-  // Render Steps
-  // ============================================================================
+  // ── helpers ──────────────────────────────────────────────────────────────
 
-  const renderStep1 = () => (
-    <div>
-      <h2 className="text-2xl font-bold mb-4 text-gray-900">Step 1: Scan Your Book</h2>
-      <p className="text-gray-600 mb-6">
-        Use your camera to capture images of your book. Our AI will automatically detect the ISBN
-        and analyze the condition.
-      </p>
-      <EnhancedAIScanner
-        onComplete={handleScanComplete}
-        onCancel={() => router.back()}
-      />
-    </div>
-  );
+  const conditionLabel = (score: number) => {
+    if (score >= 5) return 'Like New';
+    if (score >= 4) return 'Good';
+    if (score >= 3) return 'Fair';
+    if (score >= 2) return 'Poor';
+    return 'Very Poor';
+  };
 
-  const renderStep2 = () => (
-    <div>
-      <h2 className="text-2xl font-bold mb-4 text-gray-900">Step 2: Book Details</h2>
-      <p className="text-gray-600 mb-6">
-        {scanResult?.book_metadata
-          ? 'Review the auto-filled details or edit as needed.'
-          : 'Please enter the book details manually.'}
-      </p>
+  // ── Render ───────────────────────────────────────────────────────────────
 
-      <form className="space-y-6">
-        {/* ISBN */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            ISBN {scanResult?.detected_isbn && '(Auto-detected)'}
-          </label>
-          <input
-            type="text"
-            {...register('isbn')}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter ISBN (optional)"
-          />
-          {errors.isbn && (
-            <p className="mt-1 text-sm text-red-600">{errors.isbn.message}</p>
-          )}
-        </div>
-
-        {/* Title */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Title <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            {...register('title')}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter book title"
-          />
-          {errors.title && (
-            <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>
-          )}
-        </div>
-
-        {/* Author */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Author <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            {...register('author')}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter author name"
-          />
-          {errors.author && (
-            <p className="mt-1 text-sm text-red-600">{errors.author.message}</p>
-          )}
-        </div>
-
-        {/* Publisher */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Publisher</label>
-          <input
-            type="text"
-            {...register('publisher')}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter publisher (optional)"
-          />
-        </div>
-
-        {/* Edition */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Edition</label>
-          <input
-            type="text"
-            {...register('edition')}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter edition (optional)"
-          />
-        </div>
-
-        {/* Publication Year */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Publication Year
-          </label>
-          <input
-            type="number"
-            {...register('publication_year', {
-              setValueAs: (v) => (v === '' || v === null || isNaN(Number(v)) ? undefined : Number(v))
-            })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter year (optional)"
-          />
-        </div>
-
-        {/* Category */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Category <span className="text-red-500">*</span>
-          </label>
-          <select
-            {...register('category_id')}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="">Select a category</option>
-            <option value="fiction">Fiction</option>
-            <option value="non-fiction">Non-Fiction</option>
-            <option value="textbook">Textbook</option>
-            <option value="science">Science</option>
-            <option value="technology">Technology</option>
-            <option value="history">History</option>
-            <option value="biography">Biography</option>
-            <option value="children">Children</option>
-            <option value="other">Other</option>
-          </select>
-          {errors.category_id && (
-            <p className="mt-1 text-sm text-red-600">{errors.category_id.message}</p>
-          )}
-        </div>
-
-        {/* Original Price */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Original Price (₹) <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            {...register('original_price', { valueAsNumber: true })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter original price"
-          />
-          {errors.original_price && (
-            <p className="mt-1 text-sm text-red-600">{errors.original_price.message}</p>
-          )}
-        </div>
-
-        {/* Location */}
-        <div className="space-y-4">
-          <h3 className="font-medium text-gray-900">Location</h3>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              City <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              {...register('location.city')}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Enter city"
-            />
-            {errors.location?.city && (
-              <p className="mt-1 text-sm text-red-600">{errors.location.city.message}</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              State <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              {...register('location.state')}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Enter state"
-            />
-            {errors.location?.state && (
-              <p className="mt-1 text-sm text-red-600">{errors.location.state.message}</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Pincode <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              {...register('location.pincode')}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Enter 6-digit pincode"
-              maxLength={6}
-            />
-            {errors.location?.pincode && (
-              <p className="mt-1 text-sm text-red-600">{errors.location.pincode.message}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Description */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-          <textarea
-            {...register('description')}
-            rows={4}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Add any additional details about the book (optional)"
-          />
-        </div>
-
-        {/* Error Display */}
-        {error && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            {error}
-          </div>
-        )}
-
-        {/* Navigation Buttons */}
-        <div className="flex gap-4">
-          <button
-            type="button"
-            onClick={() => setCurrentStep(1)}
-            className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 font-medium"
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            onClick={handleCalculatePricing}
-            disabled={isCalculatingPricing}
-            className={`flex-1 px-6 py-3 rounded-lg font-medium ${isCalculatingPricing
-              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              : 'bg-green-600 text-white hover:bg-green-700'
-              }`}
-          >
-            {isCalculatingPricing ? 'Calculating...' : 'Calculate Pricing'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-
-  const renderStep3 = () => (
-    <div>
-      <h2 className="text-2xl font-bold mb-4 text-gray-900">Step 3: Review Condition & Pricing</h2>
-      <p className="text-gray-600 mb-6">
-        Review the condition assessment and pricing breakdown before submitting.
-      </p>
-
-      <div className="space-y-6">
-        {/* Condition Score */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h3 className="text-lg font-bold mb-4 text-gray-900">Condition Assessment</h3>
-          <div className="flex items-center gap-4 mb-4">
-            <ConditionBadge conditionScore={watchedConditionScore} size="lg" />
-          </div>
-
-          {scanResult?.condition_analysis && (
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Cover Damage:</span>
-                <span className="font-medium">
-                  {scanResult.condition_analysis.cover_damage}/5
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Page Quality:</span>
-                <span className="font-medium">
-                  {scanResult.condition_analysis.page_quality}/5
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Binding Quality:</span>
-                <span className="font-medium">
-                  {scanResult.condition_analysis.binding_quality}/5
-                </span>
-              </div>
-              {scanResult.condition_analysis.notes && (
-                <div className="mt-3 pt-3 border-t">
-                  <p className="text-gray-600">{scanResult.condition_analysis.notes}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Pricing Breakdown */}
-        {pricingBreakdown && (
-          <PricingBreakdownDisplay pricing={pricingBreakdown} showSellerPayout={true} />
-        )}
-
-        {/* Navigation Buttons */}
-        <div className="flex gap-4">
-          <button
-            type="button"
-            onClick={() => setCurrentStep(2)}
-            className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 font-medium"
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurrentStep(4)}
-            className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700"
-          >
-            Continue to Confirmation
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep4 = () => (
-    <div>
-      <h2 className="text-2xl font-bold mb-4 text-gray-900">Step 4: Confirm & Submit</h2>
-      <p className="text-gray-600 mb-6">
-        Review all details and submit your listing for admin approval.
-      </p>
-
-      <div className="space-y-6">
-        {/* Summary */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h3 className="text-lg font-bold mb-4 text-gray-900">Listing Summary</h3>
-
-          <div className="space-y-3">
-            <div>
-              <span className="text-sm text-gray-600">Title:</span>
-              <p className="font-medium text-gray-900">{watch('title')}</p>
-            </div>
-            <div>
-              <span className="text-sm text-gray-600">Author:</span>
-              <p className="font-medium text-gray-900">{watch('author')}</p>
-            </div>
-            <div>
-              <span className="text-sm text-gray-600">Condition:</span>
-              <div className="mt-2">
-                <ConditionBadge conditionScore={watchedConditionScore} />
-              </div>
-            </div>
-            <div>
-              <span className="text-sm text-gray-600">Final Price:</span>
-              <p className="text-2xl font-bold text-blue-600">
-                ₹{watch('final_price')?.toFixed(2)}
-              </p>
-            </div>
-            <div>
-              <span className="text-sm text-gray-600">You will receive:</span>
-              <p className="text-xl font-bold text-green-600">
-                ₹{watch('seller_payout')?.toFixed(2)}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Important Notice */}
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <h4 className="font-medium text-yellow-900 mb-2">⚠️ Admin Approval Required</h4>
-          <p className="text-sm text-yellow-800">
-            Your listing will be submitted for admin review. You'll receive a notification once
-            it's approved and visible to buyers.
-          </p>
-        </div>
-
-        {/* Error Display */}
-        {error && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            {error}
-          </div>
-        )}
-
-        {/* Navigation Buttons */}
-        <div className="flex gap-4">
-          <button
-            type="button"
-            onClick={() => setCurrentStep(3)}
-            disabled={isSubmitting}
-            className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 font-medium"
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit(onSubmit, (validationErrors) => {
-              const firstError = Object.values(validationErrors)[0];
-              const msg = firstError && 'message' in firstError
-                ? (firstError as any).message
-                : 'Please fill in all required fields before submitting.';
-              setError(msg as string);
-            })}
-            disabled={isSubmitting}
-            className={`flex-1 px-6 py-3 rounded-lg font-medium ${isSubmitting
-              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              : 'bg-green-600 text-white hover:bg-green-700'
-              }`}
-          >
-            {isSubmitting ? 'Submitting...' : 'Submit Listing'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  // ============================================================================
-  // Main Render
-  // ============================================================================
+  const stepLabels = ['Upload Photos', 'Scanning', 'Details', 'Confirm'];
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      {/* Progress Indicator */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
-          {[1, 2, 3, 4].map((step) => (
-            <div key={step} className="flex items-center">
-              <div
-                className={`
-                  w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm
-                  ${step === currentStep
-                    ? 'bg-green-600 text-white ring-4 ring-green-100'
-                    : step < currentStep
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-200 text-gray-600'
-                  }
-                `}
-              >
-                {step < currentStep ? '✓' : step}
-              </div>
-              {step < 4 && (
-                <div
-                  className={`w-16 h-1 mx-2 ${step < currentStep ? 'bg-green-500' : 'bg-gray-200'
-                    }`}
-                />
-              )}
+    <div className="max-w-2xl mx-auto p-6">
+      {/* Progress */}
+      <div className="flex items-center mb-2">
+        {[1, 2, 3, 4].map((s) => (
+          <div key={s} className="flex items-center flex-1">
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+              s < step ? 'bg-green-500 text-white' :
+              s === step ? 'bg-blue-600 text-white ring-4 ring-blue-100' :
+              'bg-gray-200 text-gray-500'
+            }`}>
+              {s < step ? '✓' : s}
             </div>
-          ))}
-        </div>
-        <div className="flex justify-between mt-2 text-sm">
-          <span className={currentStep === 1 ? 'font-semibold text-green-600' : 'text-gray-500'}>Scan</span>
-          <span className={currentStep === 2 ? 'font-semibold text-green-600' : 'text-gray-500'}>Details</span>
-          <span className={currentStep === 3 ? 'font-semibold text-green-600' : 'text-gray-500'}>Review</span>
-          <span className={currentStep === 4 ? 'font-semibold text-green-600' : 'text-gray-500'}>Confirm</span>
-        </div>
+            {s < 4 && <div className={`flex-1 h-1 mx-1 ${s < step ? 'bg-green-400' : 'bg-gray-200'}`} />}
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between text-xs text-gray-500 mb-8 px-1">
+        {stepLabels.map((l, i) => (
+          <span key={l} className={step === i + 1 ? 'text-blue-600 font-semibold' : ''}>{l}</span>
+        ))}
       </div>
 
-      {/* Step Content */}
-      {currentStep === 1 && renderStep1()}
-      {currentStep === 2 && renderStep2()}
-      {currentStep === 3 && renderStep3()}
-      {currentStep === 4 && renderStep4()}
+      {/* ── Step 1: Upload ── */}
+      {step === 1 && (
+        <BookImageUploader
+          onComplete={handleImagesComplete}
+          onCancel={() => router.back()}
+        />
+      )}
+
+      {/* ── Step 2: Scanning ── */}
+      {step === 2 && (
+        <div className="text-center py-16">
+          {scanning ? (
+            <>
+              <div className="animate-spin rounded-full h-14 w-14 border-4 border-blue-600 border-t-transparent mx-auto mb-5" />
+              {uploadProgress ? (
+                <>
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">Uploading images...</h2>
+                  <p className="text-sm text-gray-500 mb-3">
+                    {uploadProgress.done} of {uploadProgress.total} images uploaded
+                  </p>
+                  <div className="w-48 mx-auto bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${(uploadProgress.done / uploadProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">Analysing your book...</h2>
+                  <p className="text-sm text-gray-500">Detecting ISBN · Fetching metadata & price · Assessing condition</p>
+                </>
+              )}
+            </>
+          ) : scanError ? (
+            <>
+              <div className="text-5xl mb-4">❌</div>
+              <h2 className="text-xl font-bold text-gray-900 mb-2">Scan failed</h2>
+              <p className="text-sm text-red-600 mb-6">{scanError}</p>
+              <button onClick={() => setStep(1)}
+                className="px-6 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700">
+                Try Again
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-5xl mb-4">✅</div>
+              <h2 className="text-xl font-bold text-gray-900 mb-2">Scan complete!</h2>
+              {scanResult?.book_metadata && (
+                <p className="text-sm text-gray-600 mb-1 font-semibold">{scanResult.book_metadata.title}</p>
+              )}
+              {scanResult?.detected_isbn && (
+                <p className="text-xs text-gray-400 mb-1">ISBN: {scanResult.detected_isbn}</p>
+              )}
+              {scanResult?.original_price ? (
+                <p className="text-sm text-green-600 font-medium mb-4">
+                  MRP: ₹{scanResult.original_price}
+                  {scanResult.price_source === 'cover_price' ? ' (from cover)' : ''}
+                </p>
+              ) : (
+                <p className="text-sm text-amber-600 mb-4">⚠️ Price not found — you'll be asked to enter it</p>
+              )}
+              <button onClick={() => setStep(3)}
+                className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700">
+                Review Details →
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Step 3: Read-only AI results + manual fields ── */}
+      {step === 3 && scanResult && (
+        <div>
+          <h2 className="text-xl font-bold text-gray-900 mb-1">Book Details</h2>
+          <p className="text-sm text-gray-500 mb-5">Extracted by AI — not editable. Fill in the fields below.</p>
+
+          {/* ── AI-extracted read-only card ── */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 space-y-3 text-sm">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Extracted by AI</p>
+
+            <Row label="Title" value={scanResult.book_metadata?.title} />
+            <Row label="Author" value={scanResult.book_metadata?.author} />
+            <Row label="ISBN" value={scanResult.detected_isbn} />
+            <Row label="Publisher" value={scanResult.book_metadata?.publisher} />
+            <Row label="Edition" value={scanResult.book_metadata?.edition} />
+            <Row label="Year" value={scanResult.book_metadata?.publication_year?.toString()} />
+            <Row label="Subject" value={scanResult.book_metadata?.subject} />
+
+            {/* Price */}
+            <div className="flex justify-between items-start pt-1 border-t border-gray-200">
+              <span className="text-gray-500">Original Price (MRP)</span>
+              {scanResult.original_price ? (
+                <div className="text-right">
+                  <span className="font-semibold text-gray-900">₹{scanResult.original_price}</span>
+                  <span className="block text-xs text-gray-400">
+                    {scanResult.price_source === 'cover_price' ? 'read from cover' :
+                     scanResult.price_source ? scanResult.price_source : ''}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-amber-600 font-medium">Not found</span>
+              )}
+            </div>
+
+            {/* Condition */}
+            <div className="flex justify-between items-center pt-1 border-t border-gray-200">
+              <span className="text-gray-500">Condition</span>
+              <div className="flex items-center gap-2">
+                <ConditionBadge conditionScore={scanResult.condition_analysis.overall_score} />
+                <span className="text-xs text-gray-500">
+                  {conditionLabel(scanResult.condition_analysis.overall_score)}
+                </span>
+              </div>
+            </div>
+
+            {/* Condition breakdown */}
+            <div className="pt-2 border-t border-gray-100 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
+              <span>Cover: {scanResult.condition_analysis.cover_damage}/5</span>
+              <span>Pages: {scanResult.condition_analysis.page_quality}/5</span>
+              <span>Binding: {scanResult.condition_analysis.binding_quality}/5</span>
+              <span>Markings: {scanResult.condition_analysis.markings}/5</span>
+              <span className="col-span-2 text-gray-400 italic mt-1">{scanResult.condition_analysis.notes}</span>
+            </div>
+          </div>
+
+          {/* ── Price missing warning ── */}
+          {!scanResult.original_price && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 text-sm text-amber-800">
+              <p className="font-semibold mb-1">⚠️ Original price not found</p>
+              <p>The AI could not detect the MRP from the images or online databases. Please rescan with a clearer photo of the back cover showing the price barcode, or the price sticker.</p>
+              <button onClick={() => setStep(1)}
+                className="mt-3 px-4 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg hover:bg-amber-700">
+                Rescan Book
+              </button>
+            </div>
+          )}
+
+          {/* ── Manual fields ── */}
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-gray-700">Fill in the remaining details:</p>
+
+            {/* Category */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Category <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={manual.category_id}
+                onChange={e => setManual(m => ({ ...m, category_id: e.target.value }))}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="">Select a category</option>
+                {CATEGORIES.map(c => <option key={c} value={c.toLowerCase()}>{c}</option>)}
+              </select>
+              {manualErrors.category_id && <p className="mt-1 text-xs text-red-600">{manualErrors.category_id}</p>}
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Description <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <textarea
+                value={manual.description}
+                onChange={e => setManual(m => ({ ...m, description: e.target.value }))}
+                rows={3}
+                maxLength={500}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+                placeholder="Any extra notes about this copy (e.g. minor highlights, missing pages)..."
+              />
+            </div>
+
+            {/* Location */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Your Location <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <input
+                    type="text"
+                    value={manual.city}
+                    onChange={e => setManual(m => ({ ...m, city: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                    placeholder="City"
+                  />
+                  {manualErrors.city && <p className="mt-1 text-xs text-red-600">{manualErrors.city}</p>}
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    value={manual.state}
+                    onChange={e => setManual(m => ({ ...m, state: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                    placeholder="State"
+                  />
+                  {manualErrors.state && <p className="mt-1 text-xs text-red-600">{manualErrors.state}</p>}
+                </div>
+              </div>
+              <input
+                type="text"
+                value={manual.pincode}
+                onChange={e => setManual(m => ({ ...m, pincode: e.target.value }))}
+                maxLength={6}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                placeholder="6-digit Pincode"
+              />
+              {manualErrors.pincode && <p className="mt-1 text-xs text-red-600">{manualErrors.pincode}</p>}
+            </div>
+          </div>
+
+          {formError && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{formError}</div>
+          )}
+
+          <div className="flex gap-3 mt-6">
+            <button onClick={() => setStep(1)}
+              className="px-5 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+              Rescan
+            </button>
+            <button
+              onClick={handleCalculatePricing}
+              disabled={calculatingPrice || !scanResult.original_price}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold ${
+                calculatingPrice || !scanResult.original_price
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              {calculatingPrice ? 'Calculating...' : 'Calculate Price & Continue →'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 4: Confirm ── */}
+      {step === 4 && scanResult && pricingBreakdown && (
+        <div>
+          <h2 className="text-xl font-bold text-gray-900 mb-1">Confirm & Submit</h2>
+          <p className="text-sm text-gray-500 mb-5">Review everything before submitting for admin approval.</p>
+
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-2 text-sm">
+              <Row label="Title" value={scanResult.book_metadata?.title} />
+              <Row label="Author" value={scanResult.book_metadata?.author} />
+              {scanResult.detected_isbn && <Row label="ISBN" value={scanResult.detected_isbn} />}
+              <Row label="Category" value={manual.category_id} />
+              <Row label="Original Price" value={`₹${scanResult.original_price}`} />
+              <div className="flex justify-between items-center">
+                <span className="text-gray-500">Condition</span>
+                <ConditionBadge conditionScore={scanResult.condition_analysis.overall_score} />
+              </div>
+              <Row label="Location" value={`${manual.city}, ${manual.state} - ${manual.pincode}`} />
+            </div>
+
+            {/* Pricing */}
+            <PricingBreakdownDisplay pricing={pricingBreakdown} showSellerPayout={true} />
+
+            {/* Notice */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
+              <span className="font-semibold">⚠️ Admin approval required</span> — your listing will be reviewed before going live.
+            </div>
+
+            {formError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{formError}</div>
+            )}
+
+            <div className="flex gap-3">
+              <button onClick={() => setStep(3)} disabled={submitting}
+                className="px-5 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                Back
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className={`flex-1 py-2 rounded-lg text-sm font-semibold ${
+                  submitting ? 'bg-gray-300 text-gray-500' : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
+              >
+                {submitting ? 'Submitting...' : 'Submit Listing'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── small helper component ────────────────────────────────────────────────────
+
+function Row({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex justify-between items-start">
+      <span className="text-gray-500 flex-shrink-0">{label}</span>
+      <span className="font-medium text-gray-900 text-right ml-4 max-w-xs">{value}</span>
     </div>
   );
 }

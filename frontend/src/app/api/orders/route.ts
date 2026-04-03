@@ -9,7 +9,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
-import { createServerClient } from '@/lib/supabase/server';
 import { processOrder } from '@/services/order.service';
 import { applyRateLimit, ORDER_RATE_LIMIT } from '@/lib/rate-limit';
 
@@ -34,13 +33,34 @@ export async function POST(request: NextRequest) {
     if (!listing_id) {
       return NextResponse.json({ error: 'listing_id is required' }, { status: 400 });
     }
-    if (!delivery_address || typeof delivery_address !== 'string' || !delivery_address.trim()) {
+    if (!delivery_address) {
       return NextResponse.json({ error: 'delivery_address is required' }, { status: 400 });
     }
 
+    // Accept delivery_address as either a string or an object
+    const normalizedAddress =
+      typeof delivery_address === 'string'
+        ? delivery_address.trim()
+        : delivery_address;
+
     try {
-      const order = await processOrder(listing_id, user.id, delivery_address.trim());
-      return NextResponse.json({ success: true, data: order }, { status: 201 });
+      const result = await processOrder(listing_id, user.id, normalizedAddress);
+      // Map OrderResult fields to a flat order object the frontend expects
+      return NextResponse.json({
+        success: true,
+        data: {
+          id: result.orderId,
+          listing_id: result.listingId,
+          buyer_id: result.buyerId,
+          seller_id: result.sellerId,
+          total_amount: result.totalAmount,
+          price: result.totalAmount,
+          currency: result.currency,
+          status: result.status,
+          payment_intent_id: result.paymentIntentId,
+          client_secret: result.clientSecret,
+        }
+      }, { status: 201 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create order';
 

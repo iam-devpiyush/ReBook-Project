@@ -310,7 +310,7 @@ export default function EnhancedAIScanner({
     try {
       const supabase = createClient();
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('ai_scans')
         .select('*')
         .eq('id', scanId)

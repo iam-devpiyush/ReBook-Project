@@ -1,5 +1,10 @@
 import { MeiliSearch, Index } from 'meilisearch';
-import { logger } from '../utils/logger';
+
+const logger = {
+  info: (msg: string, ...args: unknown[]) => console.info('[meilisearch]', msg, ...args),
+  error: (msg: string, ...args: unknown[]) => console.error('[meilisearch]', msg, ...args),
+  warn: (msg: string, ...args: unknown[]) => console.warn('[meilisearch]', msg, ...args),
+};
 
 /**
  * Meilisearch client configuration

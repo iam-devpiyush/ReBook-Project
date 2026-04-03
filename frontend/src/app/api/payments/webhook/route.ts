@@ -1,7 +1,8 @@
 /**
  * API Route: /api/payments/webhook
  *
- * POST: Handle dummy payment webhook events
+ * POST: Handle Razorpay webhook events.
+ * Verifies HMAC-SHA256 signature before processing.
  *
  * Requirements: 6.9, 6.10
  */
@@ -16,11 +17,18 @@ export async function POST(request: NextRequest) {
 
   try {
     verifyWebhookSignature(rawBody, signature);
-  } catch {
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err);
     return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 400 });
   }
 
-  let event: { event: string; payload: { payment: { entity: { id: string; order_id?: string; notes?: Record<string, string> } } } };
+  let event: {
+    event: string;
+    payload: {
+      payment?: { entity: { id: string; order_id?: string; notes?: Record<string, string> } };
+      refund?: { entity: { id: string; payment_id: string; amount: number; status: string } };
+    };
+  };
   try {
     event = JSON.parse(rawBody);
   } catch {
@@ -31,34 +39,71 @@ export async function POST(request: NextRequest) {
 
   try {
     const eventType = event.event;
-    const paymentEntity = event.payload?.payment?.entity;
-    const paymentId = paymentEntity?.id;
-    const orderId = paymentEntity?.notes?.orderId ?? paymentEntity?.order_id;
 
-    if (eventType === 'payment.captured' && orderId) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (supabase as any)
-        .from('orders')
-        .update({ status: 'paid', updated_at: new Date().toISOString() })
-        .eq('id', orderId);
+    if (eventType === 'payment.captured') {
+      const paymentEntity = event.payload?.payment?.entity;
+      const orderId = paymentEntity?.notes?.orderId ?? paymentEntity?.order_id;
 
-      await supabase.channel(`order:${orderId}`).send({
-        type: 'broadcast',
-        event: 'payment.captured',
-        payload: { orderId, status: 'paid' },
-      });
-    } else if (eventType === 'payment.failed' && orderId) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (supabase as any)
-        .from('orders')
-        .update({ status: 'payment_failed', updated_at: new Date().toISOString() })
-        .eq('id', orderId);
+      if (orderId && paymentEntity) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from('payments')
+          .update({
+            status: 'completed',
+            payment_intent_id: paymentEntity.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('order_id', orderId);
 
-      await supabase.channel(`order:${orderId}`).send({
-        type: 'broadcast',
-        event: 'payment.failed',
-        payload: { orderId, status: 'payment_failed' },
-      });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from('orders')
+          .update({ status: 'paid', updated_at: new Date().toISOString() })
+          .eq('id', orderId);
+
+        await supabase.channel(`order:${orderId}`).send({
+          type: 'broadcast',
+          event: 'payment.captured',
+          payload: { orderId, status: 'paid', paymentId: paymentEntity.id },
+        });
+      }
+    } else if (eventType === 'payment.failed') {
+      const paymentEntity = event.payload?.payment?.entity;
+      const orderId = paymentEntity?.notes?.orderId ?? paymentEntity?.order_id;
+
+      if (orderId) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from('payments')
+          .update({ status: 'failed', updated_at: new Date().toISOString() })
+          .eq('order_id', orderId);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from('orders')
+          .update({ status: 'payment_failed', updated_at: new Date().toISOString() })
+          .eq('id', orderId);
+
+        await supabase.channel(`order:${orderId}`).send({
+          type: 'broadcast',
+          event: 'payment.failed',
+          payload: { orderId, status: 'payment_failed' },
+        });
+      }
+    } else if (eventType === 'refund.processed') {
+      const refundEntity = event.payload?.refund?.entity;
+      if (refundEntity) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from('payments')
+          .update({
+            status: 'refunded',
+            refund_id: refundEntity.id,
+            refund_amount: refundEntity.amount / 100,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('payment_intent_id', refundEntity.payment_id);
+      }
     }
   } catch (error) {
     console.error('Webhook processing error:', error);

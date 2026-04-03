@@ -157,7 +157,7 @@ export default function AnalyticsCharts({ days = 30 }: AnalyticsChartsProps) {
                 const date = new Date(value as string);
                 return date.toLocaleDateString();
               }}
-              formatter={(value: number) => [`${value} sales`, 'Count']}
+              formatter={(value) => [`${value ?? 0} sales`, 'Count'] as [string, string]}
             />
             <Legend />
             <Line
@@ -195,7 +195,7 @@ export default function AnalyticsCharts({ days = 30 }: AnalyticsChartsProps) {
                 const date = new Date(value as string);
                 return date.toLocaleDateString();
               }}
-              formatter={(value: number) => [`${value} listings`, 'Count']}
+              formatter={(value) => [`${value ?? 0} listings`, 'Count'] as [string, string]}
             />
             <Legend />
             <Bar
@@ -225,10 +225,10 @@ export default function AnalyticsCharts({ days = 30 }: AnalyticsChartsProps) {
             />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip
-              formatter={(value: number) => [
-                `₹${value.toFixed(2)}`,
+              formatter={(value) => [
+                `₹${Number(value ?? 0).toFixed(2)}`,
                 'Revenue',
-              ]}
+              ] as [string, string]}
             />
             <Legend />
             <Bar

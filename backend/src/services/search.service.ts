@@ -1,5 +1,10 @@
 import { getListingsIndex } from '../lib/meilisearch';
-import { logger } from '../utils/logger';
+
+const logger = {
+  info: (msg: string, ...args: unknown[]) => console.info('[search]', msg, ...args),
+  error: (msg: string, ...args: unknown[]) => console.error('[search]', msg, ...args),
+  warn: (msg: string, ...args: unknown[]) => console.warn('[search]', msg, ...args),
+};
 
 /**
  * Search Service

@@ -1,8 +1,8 @@
 /**
  * CheckoutPage Component
  *
- * Dummy payment flow — confirms order immediately on "Pay Now" click.
- * No external payment gateway required.
+ * Opens the Razorpay Checkout modal for payment.
+ * After success, verifies the signature server-side via /api/payments/verify.
  *
  * Requirements: 6.1-6.6
  */
@@ -21,6 +21,9 @@ export interface OrderSummary {
   bookImage?: string;
   sellerName: string;
   pricing: PricingBreakdown;
+  // Pre-created Razorpay order data (from /api/orders response)
+  razorpayOrderId?: string;
+  razorpayAmount?: number;
 }
 
 interface CheckoutPageProps {
@@ -33,8 +36,29 @@ interface CheckoutPageProps {
 
 type PaymentState = 'idle' | 'processing' | 'success' | 'failed';
 
+// Razorpay is loaded via script tag — declare the global
+declare global {
+  interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Razorpay: any;
+  }
+}
+
+function loadRazorpayScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (window.Razorpay) { resolve(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Razorpay script'));
+    document.body.appendChild(script);
+  });
+}
+
 export default function CheckoutPage({
   order,
+  userEmail,
+  userName,
   onSuccess,
   onFailure,
 }: CheckoutPageProps) {
@@ -47,22 +71,91 @@ export default function CheckoutPage({
     setErrorMessage(null);
 
     try {
-      const res = await fetch('/api/payments/create-intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: order.orderId }),
-      });
+      let razorpayOrderId: string;
+      let amount: number;
+      let currency = 'INR';
+      let keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
 
-      const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json.error ?? 'Payment failed');
+      if (order.razorpayOrderId) {
+        // Use pre-created Razorpay order from /api/orders response
+        razorpayOrderId = order.razorpayOrderId;
+        amount = order.razorpayAmount ?? order.pricing.final_price;
+      } else {
+        // Fallback: create Razorpay order now
+        const intentRes = await fetch('/api/payments/create-intent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: order.orderId }),
+        });
+        const intentJson = await intentRes.json();
+        if (!intentRes.ok) throw new Error(intentJson.error ?? 'Failed to create payment');
+        razorpayOrderId = intentJson.data.razorpayOrderId;
+        amount = intentJson.data.amount;
+        currency = intentJson.data.currency ?? 'INR';
+        keyId = intentJson.data.keyId ?? keyId;
       }
 
-      const pid = json.data.paymentIntentId;
-      setPaymentId(pid);
-      setPaymentState('success');
-      onSuccess?.(pid);
+      // Load Razorpay checkout script
+      await loadRazorpayScript();
+
+      // Open Razorpay modal
+      await new Promise<void>((resolve, reject) => {
+        const rzp = new window.Razorpay({
+          key: keyId ?? process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+          order_id: razorpayOrderId,
+          amount: Math.round(amount * 100), // paise
+          currency: currency ?? 'INR',
+          name: 'Rebook Marketplace',
+          description: `${order.bookTitle} by ${order.bookAuthor}`,
+          image: order.bookImage,
+          prefill: {
+            name: userName ?? '',
+            email: userEmail ?? '',
+          },
+          notes: { orderId: order.orderId },
+          theme: { color: '#2563EB' },
+          handler: async (response: {
+            razorpay_order_id: string;
+            razorpay_payment_id: string;
+            razorpay_signature: string;
+          }) => {
+            try {
+              // Verify signature server-side
+              const verifyRes = await fetch('/api/payments/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  order_id: order.orderId,
+                }),
+              });
+              const verifyJson = await verifyRes.json();
+              if (!verifyRes.ok) throw new Error(verifyJson.error ?? 'Payment verification failed');
+
+              setPaymentId(response.razorpay_payment_id);
+              setPaymentState('success');
+              onSuccess?.(response.razorpay_payment_id);
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              // User closed the modal without paying
+              reject(new Error('Payment cancelled'));
+            },
+          },
+        });
+
+        rzp.on('payment.failed', (response: { error: { description: string } }) => {
+          reject(new Error(response.error?.description ?? 'Payment failed'));
+        });
+
+        rzp.open();
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Payment failed';
       setErrorMessage(msg);
@@ -108,15 +201,18 @@ export default function CheckoutPage({
       {/* Pricing Breakdown */}
       <PricingBreakdownDisplay pricing={order.pricing} variant="default" />
 
-      {/* Demo notice */}
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
-        Demo mode — clicking "Pay Now" will instantly confirm your order.
-      </div>
-
       {/* Error */}
       {errorMessage && (
         <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-sm">
           {errorMessage}
+          {errorMessage === 'Payment cancelled' && (
+            <button
+              onClick={() => { setPaymentState('idle'); setErrorMessage(null); }}
+              className="ml-2 underline"
+            >
+              Try again
+            </button>
+          )}
         </div>
       )}
 
@@ -126,11 +222,11 @@ export default function CheckoutPage({
         className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
         aria-busy={paymentState === 'processing'}
       >
-        {paymentState === 'processing' ? 'Processing...' : `Pay ₹${order.pricing.final_price.toFixed(2)}`}
+        {paymentState === 'processing' ? 'Opening payment...' : `Pay ₹${order.pricing.final_price.toFixed(2)}`}
       </button>
 
       <p className="text-xs text-center text-gray-500">
-        Demo payment — no real money is charged.
+        Secured by Razorpay · UPI, Cards, Net Banking, Wallets accepted
       </p>
     </div>
   );

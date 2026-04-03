@@ -27,7 +27,7 @@ interface QRCodeGeneratorProps {
 
 export default function QRCodeGenerator({
   scanId,
-  onMobileConnected
+  onMobileConnected: _onMobileConnected
 }: QRCodeGeneratorProps) {
   const [mobileUrl, setMobileUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);

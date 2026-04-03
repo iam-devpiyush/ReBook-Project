@@ -1,16 +1,24 @@
 /**
  * API Route: /api/payments/create-intent
  *
- * POST: Create a dummy payment intent and immediately confirm it.
+ * POST: Create a Razorpay order and return the order ID + key for the frontend checkout.
  *
  * Requirements: 6.1, 6.2
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 import { createPaymentIntent } from '@/services/payment.service';
-import { sanitizePaymentRecord, assertNoCardData } from '@/lib/security/encryption';
+import { assertNoCardData } from '@/lib/security/encryption';
+
+// Use admin client to bypass RLS — auth check is done via requireAuth
+function adminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  ) as any;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,22 +29,23 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { order_id } = body;
 
-    // Guard: never accept raw card data (Requirement 23.4)
     assertNoCardData(body);
 
     if (!order_id) {
       return NextResponse.json({ error: 'order_id is required' }, { status: 400 });
     }
 
-    const supabase = createServerClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: order, error: orderError } = await (supabase as any)
+    const db = adminClient();
+
+    // Fetch order — use admin client so RLS doesn't block
+    const { data: order, error: orderError } = await db
       .from('orders')
-      .select('id, buyer_id, total_amount, currency, status')
+      .select('id, buyer_id, price, status')
       .eq('id', order_id)
       .single();
 
     if (orderError || !order) {
+      console.error('Order fetch error:', JSON.stringify(orderError), 'order_id:', order_id);
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
@@ -44,38 +53,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const currency = (order.currency ?? 'INR').toUpperCase();
-    const result = await createPaymentIntent(order_id, order.total_amount, currency);
+    const amount = order.price;
+    const currency = 'INR';
 
-    // Auto-confirm: update order and create payment record immediately
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any)
-      .from('orders')
-      .update({ status: 'paid', updated_at: new Date().toISOString() })
-      .eq('id', order_id);
+    // Create Razorpay order
+    const result = await createPaymentIntent(order_id, amount, currency);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any).from('payments').insert(
-      sanitizePaymentRecord({
-        order_id,
-        payment_intent_id: result.paymentIntentId,
-        amount: order.total_amount,
-        currency,
-        status: 'completed',
-        gateway: 'dummy',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-    );
+    // Upsert payment record with correct column names
+    await db.from('payments').upsert({
+      order_id,
+      payment_intent_id: result.paymentIntentId,
+      amount,
+      currency,
+      status: 'pending',
+      payment_gateway: 'razorpay',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'payment_intent_id' });
 
     return NextResponse.json({
       success: true,
       data: {
-        paymentIntentId: result.paymentIntentId,
+        razorpayOrderId: result.paymentIntentId,
         clientSecret: result.clientSecret,
-        amount: order.total_amount,
+        amount,
         currency,
-        status: 'completed',
+        keyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
       },
     });
   } catch (error) {

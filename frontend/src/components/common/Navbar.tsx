@@ -22,12 +22,12 @@ export default function Navbar() {
         // Quick check via email as fallback
         if (user.email === 'admin@rebook.demo') { setIsAdmin(true); return; }
         const supabase = createClient();
-        supabase
+        (supabase as any)
             .from('users')
             .select('role')
             .eq('id', user.id)
             .single()
-            .then(({ data, error }) => {
+            .then(({ data, error }: { data: any; error: any }) => {
                 if (error) console.warn('Navbar role fetch error:', error.message);
                 setIsAdmin(data?.role === 'admin');
             });

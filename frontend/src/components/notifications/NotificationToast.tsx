@@ -169,7 +169,7 @@ export function useNotifications() {
   }, [push]);
 
   /** Convenience: push an order status notification */
-  const notifyOrderStatus = useCallback((status: string, orderId?: string) => {
+  const notifyOrderStatus = useCallback((status: string, _orderId?: string) => {
     const messages: Record<string, string> = {
       paid:      'Payment confirmed. Your order is being processed.',
       shipped:   'Your order has been shipped.',

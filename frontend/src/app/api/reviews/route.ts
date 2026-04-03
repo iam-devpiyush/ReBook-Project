@@ -8,7 +8,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
-import { createServerClient } from '@/lib/supabase/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 

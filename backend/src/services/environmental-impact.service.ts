@@ -12,7 +12,13 @@
  */
 
 import { supabase } from '../lib/supabase';
-import { logger } from '../utils/logger';
+
+// Use console for logging so this service can be imported by Next.js API routes
+// without requiring the winston package in the frontend bundle
+const logger = {
+    info: (msg: string, ...args: unknown[]) => console.info('[eco-impact]', msg, ...args),
+    error: (msg: string, ...args: unknown[]) => console.error('[eco-impact]', msg, ...args),
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

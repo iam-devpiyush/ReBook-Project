@@ -62,7 +62,7 @@ function getSupabase() {
 export async function processOrder(
   listingId: string,
   buyerId: string,
-  deliveryAddress: string
+  deliveryAddress: string | Record<string, unknown>
 ): Promise<OrderResult> {
   const supabase = getSupabase();
   const db = supabase as any;
@@ -70,46 +70,52 @@ export async function processOrder(
   // 1. Fetch listing and validate it's active
   const { data: listing, error: listingError } = await db
     .from('listings')
-    .select('id, seller_id, final_price, status, currency')
+    .select('id, seller_id, book_id, final_price, delivery_cost, platform_commission, payment_fees, seller_payout, status, city, state, pincode')
     .eq('id', listingId)
     .single();
 
   if (listingError || !listing) {
-    throw new Error('Listing not found');
+    throw new Error(`Listing not found [${listingError?.message ?? 'no data'}]`);
   }
 
   if (listing.status !== 'active') {
-    throw new Error(`Listing is not available for purchase (status: ${listing.status})`);
+    throw new Error(`Listing is not available — current status: ${listing.status}`);
   }
 
   if (listing.seller_id === buyerId) {
     throw new Error('Seller cannot purchase their own listing');
   }
 
-  // 2. Atomically mark listing as "sold" — prevents concurrent orders
-  const { error: soldError } = await db
-    .from('listings')
-    .update({ status: 'sold', updated_at: new Date().toISOString() })
-    .eq('id', listingId)
-    .eq('status', 'active'); // optimistic lock: only update if still active
-
-  if (soldError) {
-    throw new Error('Failed to reserve listing — it may have been purchased by someone else');
-  }
+  // 2. Atomically mark listing as "sold" — the DB trigger `validate_order_on_insert`
+  // handles this inside the INSERT transaction. Pre-updating here would cause the
+  // trigger to see status='sold' and raise an exception.
+  // We still check seller ownership above to give a clear error message.
 
   try {
     // 3. Create order record
-    const currency = (listing.currency ?? 'INR').toUpperCase();
+    const currency = 'INR';
     const { data: order, error: orderError } = await db
       .from('orders')
       .insert({
         listing_id: listingId,
         buyer_id: buyerId,
         seller_id: listing.seller_id,
-        total_amount: listing.final_price,
-        currency,
-        delivery_address: deliveryAddress,
+        book_id: listing.book_id,
+        price: listing.final_price,
+        delivery_cost: listing.delivery_cost ?? 0,
+        platform_commission: listing.platform_commission ?? 0,
+        payment_fees: listing.payment_fees ?? 0,
+        seller_payout: listing.seller_payout ?? listing.final_price,
+        delivery_address: typeof deliveryAddress === 'string'
+          ? { address: deliveryAddress }
+          : deliveryAddress,
+        pickup_address: {
+          city: listing.city ?? '',
+          state: listing.state ?? '',
+          pincode: listing.pincode ?? '',
+        },
         status: 'pending_payment',
+        payment_status: 'pending',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
@@ -117,7 +123,13 @@ export async function processOrder(
       .single();
 
     if (orderError || !order) {
-      throw new Error('Failed to create order');
+      const msg = orderError?.message ?? 'unknown';
+      // DB trigger raises P0001 when listing is not active
+      if (orderError?.code === 'P0001' || msg.includes('not available')) {
+        throw new Error('Listing is not available for purchase — it may have just been sold');
+      }
+      console.error('Order insert error:', JSON.stringify(orderError));
+      throw new Error(`Failed to create order: ${msg}`);
     }
 
     // 4. Create payment intent
@@ -139,11 +151,7 @@ export async function processOrder(
       clientSecret,
     };
   } catch (err) {
-    // Rollback: restore listing to active
-    await db
-      .from('listings')
-      .update({ status: 'active', updated_at: new Date().toISOString() })
-      .eq('id', listingId);
+    // The DB trigger rolls back the listing status automatically on order insert failure
     throw err;
   }
 }

@@ -13,39 +13,22 @@ export default function CartDrawer() {
     const { items, removeItem, clearCart, open, setOpen } = useCart();
     const { user } = useAuth();
     const router = useRouter();
-    const [placingId, setPlacingId] = useState<string | null>(null);
+    const [placingId] = useState<string | null>(null);
     const [errors, setErrors] = useState<Record<string, string>>({});
-    const [successIds, setSuccessIds] = useState<Set<string>>(new Set());
+    const [successIds] = useState<Set<string>>(new Set());
 
     const total = items.reduce((sum, i) => sum + i.price, 0);
 
     const handlePlaceOrder = async (listingId: string) => {
         if (!user) { router.push('/auth/signin'); return; }
-        setPlacingId(listingId);
-        setErrors(prev => { const n = { ...prev }; delete n[listingId]; return n; });
-        try {
-            const res = await fetch('/api/orders/instant', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ listing_id: listingId }),
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Failed to place order');
-            setSuccessIds(prev => new Set(prev).add(listingId));
-            setTimeout(() => removeItem(listingId), 1500);
-        } catch (err) {
-            setErrors(prev => ({ ...prev, [listingId]: err instanceof Error ? err.message : 'Failed' }));
-        } finally {
-            setPlacingId(null);
-        }
+        // Redirect to the proper checkout page with address form + Razorpay payment
+        setOpen(false);
+        router.push(`/orders/checkout?listing_id=${listingId}`);
     };
 
     const handlePlaceAll = async () => {
-        for (const item of items) {
-            if (!successIds.has(item.listingId)) {
-                await handlePlaceOrder(item.listingId);
-            }
-        }
+        const first = items.find(i => !successIds.has(i.listingId));
+        if (first) handlePlaceOrder(first.listingId);
     };
 
     if (!open) return null;

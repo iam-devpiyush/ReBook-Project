@@ -132,7 +132,6 @@ export default function AdminDashboard() {
   const [moderating, setModerating] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
-  const [moderationMsg, setModerationMsg] = useState<{ id: string; type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchPending = useCallback(async () => {
     try {
@@ -155,21 +154,28 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  // Toast notification state
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setToast({ type, text });
+    setTimeout(() => setToast(null), 3500);
+  };
+
   const handleApprove = async (id: string) => {
     setModerating(id);
     try {
       const res = await fetch(`/api/admin/listings/${id}/approve`, { method: 'PUT' });
       if (res.ok) {
         setPendingListings(p => p.filter(l => l.id !== id));
-        setModerationMsg({ id, type: 'success', text: 'Approved' });
-        fetchData();
+        setExpandedId(null);
+        showToast('success', 'Listing approved successfully');
       } else {
         const j = await res.json();
-        setModerationMsg({ id, type: 'error', text: j.error ?? 'Failed to approve' });
+        showToast('error', j.error ?? 'Failed to approve');
       }
     } finally {
       setModerating(null);
-      setTimeout(() => setModerationMsg(null), 3000);
     }
   };
 
@@ -186,15 +192,14 @@ export default function AdminDashboard() {
         setPendingListings(p => p.filter(l => l.id !== id));
         setRejectId(null);
         setRejectReason('');
-        setModerationMsg({ id, type: 'success', text: 'Rejected' });
-        fetchData();
+        setExpandedId(null);
+        showToast('success', 'Listing rejected');
       } else {
         const j = await res.json();
-        setModerationMsg({ id, type: 'error', text: j.error ?? 'Failed to reject' });
+        showToast('error', j.error ?? 'Failed to reject');
       }
     } finally {
       setModerating(null);
-      setTimeout(() => setModerationMsg(null), 3000);
     }
   };
 
@@ -338,7 +343,6 @@ export default function AdminDashboard() {
             {pendingListings.map(listing => {
               const book = listing.book;
               const isBusy = moderating === listing.id;
-              const msg = moderationMsg?.id === listing.id ? moderationMsg : null;
               const isExpanded = expandedId === listing.id;
               const images = listing.images ?? [];
               const imageLabels = ['Front Cover', 'Back Cover', 'Spine', 'Pages'];
@@ -457,12 +461,6 @@ export default function AdminDashboard() {
                         </div>
                       )}
 
-                      {msg && (
-                        <p className={`text-xs font-medium ${msg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-                          {msg.text}
-                        </p>
-                      )}
-
                       {/* Action buttons */}
                       {rejectId !== listing.id && (
                         <div className="flex gap-3 pt-1">
@@ -568,6 +566,28 @@ export default function AdminDashboard() {
           </div>
         </div>
       </section>
+
+      {/* ── Toast notification ── */}
+      {toast && (
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg text-sm font-medium transition-all duration-300 ${
+            toast.type === 'success'
+              ? 'bg-green-600 text-white'
+              : 'bg-red-600 text-white'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          )}
+          {toast.text}
+        </div>
+      )}
     </div>
   );
 }
