@@ -14,7 +14,6 @@ export default function CartDrawer() {
     const { user } = useAuth();
     const router = useRouter();
     const [placingId] = useState<string | null>(null);
-    const [errors, setErrors] = useState<Record<string, string>>({});
     const [successIds] = useState<Set<string>>(new Set());
 
     const total = items.reduce((sum, i) => sum + i.price, 0);
@@ -85,7 +84,6 @@ export default function CartDrawer() {
                         items.map(item => {
                             const isSuccess = successIds.has(item.listingId);
                             const isPlacing = placingId === item.listingId;
-                            const err = errors[item.listingId];
 
                             return (
                                 <div key={item.listingId} className={`flex gap-3 p-3 rounded-xl border transition-colors ${isSuccess ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-white'}`}>
@@ -104,8 +102,6 @@ export default function CartDrawer() {
                                         <p className="text-xs text-gray-500 truncate">{item.author}</p>
                                         <p className="text-xs text-gray-400 mt-0.5">{CONDITION_LABELS[item.conditionScore] ?? `Score ${item.conditionScore}`}</p>
                                         <p className="text-sm font-bold text-green-600 mt-1">₹{item.price.toLocaleString('en-IN')}</p>
-
-                                        {err && <p className="text-xs text-red-500 mt-1">{err}</p>}
 
                                         {isSuccess ? (
                                             <p className="text-xs text-green-600 font-medium mt-1">✓ Order placed!</p>

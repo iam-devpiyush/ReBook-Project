@@ -171,7 +171,7 @@ export async function processOrder(
  */
 export async function confirmPaymentAndGenerateShipping(
   orderId: string,
-  paymentIntentId: string,
+  _paymentIntentId: string,
   sellerAddress: string,
   buyerAddress: string
 ): Promise<OrderStatusUpdate> {
@@ -185,7 +185,7 @@ export async function confirmPaymentAndGenerateShipping(
     .eq('id', orderId);
 
   // 2. Generate shipping label
-  const label = await generateShippingLabel(orderId, sellerAddress, buyerAddress);
+  const label = await generateShippingLabel(orderId, sellerAddress as any, buyerAddress as any, 'Book', 500);
 
   // 3. Create shipping record
   await db.from('shipping').insert({

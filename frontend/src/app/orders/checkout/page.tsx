@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import CheckoutPage from '@/components/payment/CheckoutPage';
@@ -33,7 +33,7 @@ interface ListingData {
 
 type Stage = 'address' | 'payment';
 
-export default function CheckoutRoute() {
+function CheckoutContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user, loading: authLoading } = useAuth();
@@ -293,5 +293,13 @@ export default function CheckoutRoute() {
                 )}
             </div>
         </div>
+    );
+}
+
+export default function CheckoutRoute() {
+    return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" /></div>}>
+            <CheckoutContent />
+        </Suspense>
     );
 }

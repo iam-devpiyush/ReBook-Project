@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 /**
  * Get Current User API Route
  * 

@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
 import { createClient } from '@supabase/supabase-js';
@@ -13,7 +14,7 @@ function createAdminClient() {
 function getMeiliClient() {
   return new MeiliSearch({
     host: process.env.MEILISEARCH_HOST || 'http://localhost:7700',
-    apiKey: process.env.MEILISEARCH_API_KEY || '',
+    apiKey: process.env.MEILISEARCH_ADMIN_API_KEY || process.env.MEILISEARCH_API_KEY || '',
   });
 }
 

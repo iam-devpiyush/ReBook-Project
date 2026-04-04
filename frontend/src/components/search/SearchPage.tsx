@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import ListingCard from './ListingCard';
 import type { ListingDocument, SortBy } from '@/services/search.service';
@@ -48,9 +48,7 @@ const CATEGORIES = [
 ];
 
 interface SearchPageProps {
-  /** When provided, renders as an embedded section (no full-page chrome) */
   embedded?: boolean;
-  /** Max number of results to show in embedded mode */
   limit?: number;
   onListingClick?: (listing: ListingDocument) => void;
 }
@@ -58,12 +56,17 @@ interface SearchPageProps {
 export default function SearchPage({ embedded = false, limit, onListingClick }: SearchPageProps) {
   const [query, setQuery] = useState('');
   const [inputValue, setInputValue] = useState('');
-  const [filters, setFilters] = useState<SearchFilters>({ conditions: [] });
+  const [filters, setFilters] = useState<SearchFilters>({ conditions: [], price_max: 2000 });
   const [sortBy, setSortBy] = useState<SortBy>('date_desc');
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 2000]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const buildUrl = useCallback((q: string, f: SearchFilters, sort: SortBy, p: number) => {
     const params = new URLSearchParams();
@@ -96,17 +99,61 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
 
   useEffect(() => { doSearch(query, filters, sortBy, page); }, [query, filters, sortBy, page, doSearch]);
 
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleInputChange = (value: string) => {
+    setInputValue(value);
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(() => { setQuery(value); setPage(1); }, 300);
+    if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
+    if (value.trim().length >= 2) {
+      suggestDebounce.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/search/autocomplete?q=${encodeURIComponent(value.trim())}&limit=6`);
+          const json = await res.json();
+          const list: string[] = json.suggestions ?? [];
+          setSuggestions(list);
+          setShowSuggestions(list.length > 0);
+        } catch {
+          setSuggestions([]);
+          setShowSuggestions(false);
+        }
+      }, 200);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  const selectSuggestion = (s: string) => {
+    setInputValue(s);
+    setQuery(s);
+    setPage(1);
+    setShowSuggestions(false);
+    setSuggestions([]);
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    setQuery(inputValue);
+    setPage(1);
+    setShowSuggestions(false);
+  };
+
   const toggleCondition = (score: number) => {
     setFilters(f => ({
       ...f,
       conditions: f.conditions.includes(score) ? f.conditions.filter(c => c !== score) : [...f.conditions, score],
     }));
-    setPage(1);
-  };
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setQuery(inputValue);
     setPage(1);
   };
 
@@ -116,10 +163,8 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
 
   return (
     <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>
-      {/* ── Page header ── */}
       <div className={embedded ? 'mb-5' : 'bg-white border-b border-gray-200 px-4 py-5 shadow-sm'}>
         <div className={embedded ? '' : 'max-w-7xl mx-auto'}>
-          {/* Title row */}
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Browse Books</h1>
@@ -127,37 +172,46 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
                 {loading ? 'Loading...' : `${totalResults.toLocaleString()} book${totalResults !== 1 ? 's' : ''} available`}
               </p>
             </div>
-            {!embedded && (
-              <Link
-                href="/search"
-                className="hidden sm:inline-flex items-center gap-1.5 text-sm font-medium text-green-600 hover:text-green-700"
-              >
-                Browse Full Book Catalog →
-              </Link>
-            )}
-            {embedded && (
-              <Link
-                href="/search"
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-green-600 hover:text-green-700"
-              >
-                Browse Full Book Catalog →
-              </Link>
-            )}
+            <Link
+              href="/search"
+              className={`${embedded ? 'inline-flex' : 'hidden sm:inline-flex'} items-center gap-1.5 text-sm font-medium text-green-600 hover:text-green-700`}
+            >
+              Browse Full Book Catalog →
+            </Link>
           </div>
 
-          {/* Search + sort row */}
           <form onSubmit={handleSearch} className="flex gap-2">
-            <div className="flex-1 relative">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div ref={wrapperRef} className="flex-1 relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               <input
                 type="search"
                 value={inputValue}
-                onChange={e => setInputValue(e.target.value)}
+                onChange={e => handleInputChange(e.target.value)}
+                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
                 placeholder="Search by title, author, or ISBN..."
+                autoComplete="off"
                 className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               />
+              {showSuggestions && suggestions.length > 0 && (
+                <ul className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                  {suggestions.map((s, i) => (
+                    <li key={i}>
+                      <button
+                        type="button"
+                        onMouseDown={() => selectSuggestion(s)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 flex items-center gap-2"
+                      >
+                        <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        {s}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
             <select
               value={sortBy}
@@ -175,9 +229,7 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
 
       <div className={embedded ? '' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6'}>
         <div className="flex gap-6">
-          {/* ── Sidebar filters ── */}
           <aside className="hidden md:block w-56 flex-shrink-0 space-y-4">
-            {/* Condition */}
             <div className="bg-white rounded-xl border border-gray-200 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Condition</h3>
               <div className="space-y-2">
@@ -195,7 +247,6 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
               </div>
             </div>
 
-            {/* Category */}
             <div className="bg-white rounded-xl border border-gray-200 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Category</h3>
               <select
@@ -207,7 +258,6 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
               </select>
             </div>
 
-            {/* Price Range */}
             <div className="bg-white rounded-xl border border-gray-200 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Price Range</h3>
               <div className="space-y-3">
@@ -233,9 +283,7 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
             </div>
           </aside>
 
-          {/* ── Main content ── */}
           <div className="flex-1 min-w-0">
-            {/* Results grid */}
             {loading ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                 {Array.from({ length: 8 }).map((_, i) => (
@@ -266,7 +314,6 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
               </div>
             )}
 
-            {/* Pagination (full page only) */}
             {!embedded && !loading && totalPages > 1 && (
               <div className="flex items-center justify-center gap-2 mt-8">
                 <button onClick={() => setPage(p => p - 1)} disabled={page <= 1}

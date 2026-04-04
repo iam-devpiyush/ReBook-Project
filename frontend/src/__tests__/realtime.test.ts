@@ -45,18 +45,17 @@ import {
 } from '@/services/notification.service';
 
 // ---------------------------------------------------------------------------
-// Helpers to access the mocked fns
+// Helpers (kept for potential future use)
 // ---------------------------------------------------------------------------
 
-function getChannelMock() {
+function _getChannelMock() {
   const client = vi.mocked(createClient).mock.results[0]?.value;
   return client?.channel as ReturnType<typeof vi.fn>;
 }
 
-function getSendMock() {
+function _getSendMock() {
   const client = vi.mocked(createClient).mock.results[0]?.value;
   const channelMock = client?.channel as ReturnType<typeof vi.fn>;
-  // send is on the object returned by channel()
   return channelMock?.mock.results[0]?.value?.send as ReturnType<typeof vi.fn>;
 }
 

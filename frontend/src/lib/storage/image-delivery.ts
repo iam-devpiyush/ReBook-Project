@@ -86,7 +86,7 @@ export async function getSignedImageUrls(
     }
 
     return data.map((item) => ({
-        path: item.path,
+        path: item.path ?? '',
         signedUrl: item.signedUrl ?? null,
     }));
 }

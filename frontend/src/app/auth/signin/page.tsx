@@ -7,12 +7,15 @@
 
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signInWithGoogle, signInWithApple, signInWithMicrosoft } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/client';
+import { Suspense } from 'react';
 
-export default function SignInPage() {
+function SignInContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState<string | null>(null);
@@ -264,5 +267,13 @@ export default function SignInPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>}>
+      <SignInContent />
+    </Suspense>
   );
 }

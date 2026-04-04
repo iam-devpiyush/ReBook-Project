@@ -7,7 +7,7 @@
  * Requirements: 4.3, 7.1, 7.2, 19.4
  */
 
-import { Location, DeliveryCostRequest, DeliveryCostResponse } from '@/types/pricing';
+import { Location, DeliveryCostResponse } from '@/types/pricing';
 
 // Cache for delivery cost estimates (in-memory for now, could be Redis in production)
 const deliveryCostCache = new Map<string, { cost: number; timestamp: number }>();

@@ -152,7 +152,7 @@ export async function processRefund(
     refundOptions.amount = Math.round(amount * 100); // convert to paise
   }
 
-  const refund = await razorpay.payments.refund(paymentId, refundOptions);
+  const refund = await razorpay.payments.refund(paymentId, refundOptions as any);
 
   const supabase = getSupabase();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

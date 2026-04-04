@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 /**
  * GET /api/books/cover?isbn=...&title=...&author=...
  * Returns the best available cover image URL for a book.

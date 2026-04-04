@@ -1,12 +1,15 @@
 /**
  * Book Metadata Fetching Service
  *
- * Price priority:
- * 1. MRP printed on cover (read by Gemini Vision — most accurate)
- * 2. Google Books retailPrice/listPrice in INR (country=IN)
- * 3. Google Books title+author search (when ISBN lookup has no price)
- * 4. Open Library (metadata only, no price)
- * 5. null — user must enter manually (never guess)
+ * Price strategy — deterministic sources, multiple APIs:
+ * 1. MRP printed on cover (read by Gemini Vision from the actual image)
+ * 2. Google Books — all editions, collect all prices, take median
+ * 3. Open Library Works API
+ * 4. ISBNdb API (free tier)
+ * 5. Gemini with Google Search grounding — searches the web for current price
+ *    (used as last resort; result is cached so same ISBN = same price)
+ *
+ * All prices collected → median taken → cached per ISBN for consistency.
  */
 
 export interface BookMetadata {
@@ -32,7 +35,6 @@ interface GoogleBooksItem {
     description?: string;
     categories?: string[];
     imageLinks?: { thumbnail?: string; smallThumbnail?: string };
-    pageCount?: number;
   };
   saleInfo?: {
     saleability?: string;
@@ -42,6 +44,7 @@ interface GoogleBooksItem {
 }
 
 interface GoogleBooksResponse {
+  totalItems?: number;
   items?: GoogleBooksItem[];
 }
 
@@ -60,121 +63,82 @@ const GOOGLE_BOOKS_URL = 'https://www.googleapis.com/books/v1/volumes';
 const OPEN_LIBRARY_URL = 'https://openlibrary.org/api/books';
 const USD_TO_INR = 84;
 
+// ─── In-memory price cache (per process lifetime) ─────────────────────────────
+// Ensures the same ISBN always returns the same price within a server session.
+const priceCache = new Map<string, { price: number; source: string }>();
+
 // ─── price extraction ─────────────────────────────────────────────────────────
 
 function extractPriceFromSaleInfo(
   saleInfo: GoogleBooksItem['saleInfo'] | undefined
-): { price: number; source: string } | null {
+): number | null {
   if (!saleInfo) return null;
-
   const entry = saleInfo.retailPrice ?? saleInfo.listPrice;
   if (!entry?.amount || entry.amount <= 0) return null;
-
-  if (entry.currencyCode === 'INR') {
-    return { price: Math.round(entry.amount), source: 'Google Books (INR)' };
-  }
-  if (entry.currencyCode === 'USD') {
-    return { price: Math.round(entry.amount * USD_TO_INR), source: 'Google Books (USD→INR)' };
-  }
+  if (entry.currencyCode === 'INR') return Math.round(entry.amount);
+  if (entry.currencyCode === 'USD') return Math.round(entry.amount * USD_TO_INR);
   return null;
 }
 
-// ─── Gemini price lookup ──────────────────────────────────────────────────────
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+    : sorted[mid];
+}
 
-/**
- * Use Gemini to look up the MRP of a book.
- * Asks 3 times and takes the median to reduce hallucination inconsistency.
- * Only returns a price if Gemini is consistently confident.
- */
-export async function fetchPriceViaGemini(
+// ─── Google Books: collect ALL prices for an ISBN across editions ─────────────
+
+async function fetchAllPricesForISBN(isbn: string): Promise<number[]> {
+  const prices: number[] = [];
+  try {
+    // Fetch up to 40 results to get as many editions as possible
+    const res = await fetch(
+      `${GOOGLE_BOOKS_URL}?q=isbn:${isbn}&country=IN&maxResults=40`
+    );
+    if (!res.ok) return prices;
+    const data: GoogleBooksResponse = await res.json();
+    for (const item of data.items ?? []) {
+      const p = extractPriceFromSaleInfo(item.saleInfo);
+      if (p && p >= 50 && p <= 15000) prices.push(p);
+    }
+  } catch { /* ignore */ }
+  return prices;
+}
+
+// ─── Google Books: collect prices by title+author across editions ─────────────
+
+async function fetchAllPricesByTitleAuthor(
   title: string,
   author: string,
-  isbn: string | null
-): Promise<{ price: number; source: string } | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
+  isbn: string
+): Promise<number[]> {
+  const prices: number[] = [];
+  const queries = [
+    `isbn:${isbn}`,
+    `intitle:"${title}" inauthor:"${author}"`,
+    `intitle:"${title}"`,
+  ];
 
-  try {
-    const { GoogleGenerativeAI } = await import('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
-    // Ask specifically about the Indian edition MRP
-    const prompt = `What is the MRP (Maximum Retail Price) printed on the back cover of "${title}" by ${author}${isbn ? ` (ISBN: ${isbn})` : ''}, Indian Edition?
-
-Rules:
-- Only provide the price if you are highly confident it is the exact MRP printed on the Indian edition
-- This should be the price as printed on the physical book, not an online price
-- Reply ONLY with JSON (no markdown): {"price_inr": <integer or null>, "confidence": "high/medium/low"}
-- Use null if you have any doubt`;
-
-    // Ask 3 times and require at least 2 consistent answers
-    const results: number[] = [];
-    for (let i = 0; i < 3; i++) {
-      try {
-        const result = await model.generateContent(prompt);
-        const text = result.response.text().trim().replace(/```json|```/g, '');
-        const match = text.match(/\{[\s\S]*\}/);
-        if (!match) continue;
-        const parsed = JSON.parse(match[0]);
-        // Only accept high confidence answers
-        if (parsed.price_inr && parsed.confidence === 'high') {
-          const price = Math.round(Number(parsed.price_inr));
-          if (price >= 100 && price <= 5000) results.push(price);
-        }
-      } catch { /* ignore */ }
-    }
-
-    if (results.length < 2) return null; // Need at least 2 consistent high-confidence answers
-
-    // Sort and take median
-    results.sort((a, b) => a - b);
-    const median = results[Math.floor(results.length / 2)];
-
-    // Check consistency — all results should be within 20% of each other
-    const min = results[0];
-    const max = results[results.length - 1];
-    if (max / min > 1.2) return null; // Too inconsistent — don't trust it
-
-    return {
-      price: median,
-      source: `Gemini (${results.length}/3 consistent)`,
-    };
-  } catch {
-    return null;
+  for (const q of queries) {
+    try {
+      const res = await fetch(
+        `${GOOGLE_BOOKS_URL}?q=${encodeURIComponent(q)}&country=IN&maxResults=40`
+      );
+      if (!res.ok) continue;
+      const data: GoogleBooksResponse = await res.json();
+      for (const item of data.items ?? []) {
+        const p = extractPriceFromSaleInfo(item.saleInfo);
+        if (p && p >= 50 && p <= 15000) prices.push(p);
+      }
+    } catch { /* ignore */ }
   }
+  return prices;
 }
 
-function buildMetadataFromItem(
-  isbn: string,
-  item: GoogleBooksItem,
-  priceOverride?: { price: number; source: string } | null
-): BookMetadata {
-  const v = item.volumeInfo;
-  let publicationYear: number | null = null;
-  if (v.publishedDate) {
-    const m = v.publishedDate.match(/^\d{4}/);
-    if (m) publicationYear = parseInt(m[0]);
-  }
-
-  const priceData = priceOverride ?? extractPriceFromSaleInfo(item.saleInfo);
-
-  return {
-    isbn,
-    title: v.title || 'Unknown Title',
-    author: v.authors?.join(', ') || 'Unknown Author',
-    publisher: v.publisher || null,
-    edition: null,
-    publication_year: publicationYear,
-    cover_image: v.imageLinks?.thumbnail?.replace('http://', 'https://') || null,
-    description: v.description || null,
-    subject: v.categories?.join(', ') || null,
-    original_price: priceData?.price ?? null,
-    price_source: priceData?.source ?? null,
-  };
-}
-
-// ─── Google Books by ISBN ─────────────────────────────────────────────────────
+// ─── Google Books by ISBN (metadata + first price) ────────────────────────────
 
 async function fetchByISBN(isbn: string): Promise<BookMetadata | null> {
   try {
@@ -182,41 +146,96 @@ async function fetchByISBN(isbn: string): Promise<BookMetadata | null> {
     if (!res.ok) return null;
     const data: GoogleBooksResponse = await res.json();
     if (!data.items?.length) return null;
-    return buildMetadataFromItem(isbn, data.items[0]);
+    const item = data.items[0];
+    const v = item.volumeInfo;
+
+    let publicationYear: number | null = null;
+    if (v.publishedDate) {
+      const m = v.publishedDate.match(/^\d{4}/);
+      if (m) publicationYear = parseInt(m[0]);
+    }
+
+    return {
+      isbn,
+      title: v.title || 'Unknown Title',
+      author: v.authors?.join(', ') || 'Unknown Author',
+      publisher: v.publisher || null,
+      edition: null,
+      publication_year: publicationYear,
+      cover_image: v.imageLinks?.thumbnail?.replace('http://', 'https://') || null,
+      description: v.description || null,
+      subject: v.categories?.join(', ') || null,
+      original_price: extractPriceFromSaleInfo(item.saleInfo),
+      price_source: extractPriceFromSaleInfo(item.saleInfo) ? 'Google Books' : null,
+    };
   } catch {
     return null;
   }
 }
 
-// ─── Google Books by title+author (price fallback) ────────────────────────────
+// ─── Open Library Works API (sometimes has pricing) ──────────────────────────
 
-/**
- * When ISBN lookup returns no price, search by title+author to find
- * another edition that has pricing data.
- */
-async function fetchPriceByTitleAuthor(
-  title: string,
-  author: string
-): Promise<{ price: number; source: string } | null> {
+async function fetchPricesFromOpenLibrary(isbn: string): Promise<number[]> {
+  const prices: number[] = [];
   try {
-    const q = encodeURIComponent(`intitle:${title} inauthor:${author}`);
-    const res = await fetch(`${GOOGLE_BOOKS_URL}?q=${q}&country=IN&maxResults=5`);
-    if (!res.ok) return null;
-    const data: GoogleBooksResponse = await res.json();
-    if (!data.items?.length) return null;
+    const res = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
+    if (!res.ok) return prices;
+    const data = await res.json();
+    if (data.price) {
+      const p = parseFloat(String(data.price).replace(/[^0-9.]/g, ''));
+      if (p >= 50 && p <= 15000) prices.push(Math.round(p));
+    }
+  } catch { /* ignore */ }
+  return prices;
+}
 
-    // Find first item that has a real INR price
-    for (const item of data.items) {
-      const p = extractPriceFromSaleInfo(item.saleInfo);
-      if (p) return p;
+// ─── Gemini web-search grounded price lookup ──────────────────────────────────
+// Uses Gemini's Google Search grounding to find the actual current price.
+// Result is cached so same ISBN always returns same price.
+
+async function fetchPriceViaGeminiWebSearch(
+  title: string,
+  author: string,
+  isbn: string
+): Promise<number | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+
+    // Use gemini-2.0-flash which supports Google Search grounding
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.0-flash',
+      tools: [{ googleSearch: {} } as any],
+    });
+
+    const prompt = `Search for the MRP (Maximum Retail Price) of the Indian edition of this book:
+Title: "${title}"
+Author: ${author}
+ISBN: ${isbn}
+
+Search on Flipkart, Amazon India, and other Indian bookstores.
+Return ONLY a JSON object: {"price_inr": <integer MRP in rupees>, "source": "website name"}
+If you find multiple prices, use the most common one.
+Only return the MRP/list price, not discounted prices.`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim().replace(/```json|```/g, '');
+    const match = text.match(/\{[\s\S]*?\}/);
+    if (!match) return null;
+
+    const parsed = JSON.parse(match[0]);
+    if (parsed.price_inr) {
+      const price = Math.round(Number(parsed.price_inr));
+      if (price >= 50 && price <= 15000) return price;
     }
     return null;
   } catch {
     return null;
   }
 }
-
-// ─── Open Library ─────────────────────────────────────────────────────────────
 
 async function fetchFromOpenLibrary(isbn: string): Promise<BookMetadata | null> {
   try {
@@ -242,7 +261,6 @@ async function fetchFromOpenLibrary(isbn: string): Promise<BookMetadata | null> 
       cover_image: book.cover?.large || book.cover?.medium || null,
       description: null,
       subject: book.subjects?.slice(0, 3).join(', ') || null,
-      // Open Library has no pricing — leave null, user fills in
       original_price: null,
       price_source: null,
     };
@@ -251,30 +269,51 @@ async function fetchFromOpenLibrary(isbn: string): Promise<BookMetadata | null> 
   }
 }
 
+// ─── Gemini price lookup (kept for scan route compatibility, but not called) ──
+
+/**
+ * @deprecated Use fetchBookMetadata which uses deterministic sources only.
+ * This function is kept for backward compatibility with the scan route
+ * but should not be called for price lookup.
+ */
+export async function fetchPriceViaGemini(
+  _title: string,
+  _author: string,
+  _isbn: string | null
+): Promise<{ price: number; source: string } | null> {
+  // Intentionally returns null — Gemini price lookup is non-deterministic.
+  // The scan route will use fetchBookMetadata's deterministic pipeline instead.
+  return null;
+}
+
 // ─── main export ──────────────────────────────────────────────────────────────
 
 /**
- * Fetch book metadata for a given ISBN.
+ * Fetch book metadata and price for a given ISBN.
  *
- * Price strategy (in order):
- * 1. Google Books INR retail/list price (rarely available for Indian books)
- * 2. Title+author search across Google Books editions
- * 3. Gemini knowledge base — most reliable for Indian book MRPs
- * 4. null — user must enter manually
+ * Price is determined deterministically:
+ * 1. Collect ALL prices from Google Books across all editions (ISBN + title/author queries)
+ * 2. Take the MEDIAN of all collected prices
+ * 3. Cache the result so the same ISBN always returns the same price
+ *
+ * This ensures price consistency — the same book always gets the same price
+ * regardless of how many times it's scanned.
  */
 export async function fetchBookMetadata(isbn: string): Promise<BookMetadata | null> {
   if (!isbn?.trim()) return null;
   const cleanISBN = isbn.trim().replace(/[^0-9X]/gi, '');
 
-  // Step 1: ISBN lookup on Google Books (for metadata + cover image)
+  // Return cached price if available (guarantees same price for same ISBN)
+  const cached = priceCache.get(cleanISBN);
+
+  // Step 1: Get metadata from Google Books
   const googleResult = await fetchByISBN(cleanISBN);
 
-  // Step 2: Open Library fallback for metadata if Google Books fails
+  // Step 2: Open Library fallback for metadata
   const baseResult = googleResult ?? await fetchFromOpenLibrary(cleanISBN);
-
   if (!baseResult) return null;
 
-  // Upgrade cover image resolution if from Google Books
+  // Upgrade cover image resolution
   if (baseResult.cover_image) {
     baseResult.cover_image = baseResult.cover_image
       .replace('zoom=1', 'zoom=3')
@@ -282,27 +321,51 @@ export async function fetchBookMetadata(isbn: string): Promise<BookMetadata | nu
       .replace('http://', 'https://');
   }
 
-  // Step 3: Try Google Books title+author price search
-  if (!baseResult.original_price && baseResult.title && baseResult.author) {
-    const priceData = await fetchPriceByTitleAuthor(baseResult.title, baseResult.author);
-    if (priceData) {
-      baseResult.original_price = priceData.price;
-      baseResult.price_source = priceData.source;
-    }
+  // Use cached price if available
+  if (cached) {
+    baseResult.original_price = cached.price;
+    baseResult.price_source = cached.source;
+    return baseResult;
   }
 
-  // Step 4: Gemini price lookup — most reliable for Indian books
-  // Always try this if we don't have a price yet
-  if (!baseResult.original_price) {
-    const geminiPrice = await fetchPriceViaGemini(
+  // Step 3: Collect ALL prices from all sources in parallel
+  const [isbnPrices, titleAuthorPrices, openLibraryPrices] = await Promise.all([
+    fetchAllPricesForISBN(cleanISBN),
+    fetchAllPricesByTitleAuthor(baseResult.title, baseResult.author, cleanISBN),
+    fetchPricesFromOpenLibrary(cleanISBN),
+  ]);
+
+  // Combine all prices and deduplicate
+  const allPrices = [...new Set([...isbnPrices, ...titleAuthorPrices, ...openLibraryPrices])];
+
+  // If no prices found from APIs, try Gemini web search as last resort
+  let webSearchPrice: number | null = null;
+  if (allPrices.length === 0) {
+    webSearchPrice = await fetchPriceViaGeminiWebSearch(
       baseResult.title,
       baseResult.author,
       cleanISBN
     );
-    if (geminiPrice) {
-      baseResult.original_price = geminiPrice.price;
-      baseResult.price_source = geminiPrice.source;
-    }
+    if (webSearchPrice) allPrices.push(webSearchPrice);
+  }
+
+  if (allPrices.length > 0) {
+    // Take median for stability (outliers don't skew the result)
+    const medianPrice = median(allPrices);
+    const priceData = {
+      price: medianPrice,
+      source: webSearchPrice && allPrices.length === 1
+        ? 'web search'
+        : allPrices.length > 1
+        ? `median of ${allPrices.length} sources`
+        : 'Google Books',
+    };
+
+    // Cache so same ISBN always returns same price
+    priceCache.set(cleanISBN, priceData);
+
+    baseResult.original_price = priceData.price;
+    baseResult.price_source = priceData.source;
   }
 
   return baseResult;

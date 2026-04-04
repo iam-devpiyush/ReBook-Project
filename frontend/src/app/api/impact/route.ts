@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 /**
  * GET /api/impact
  * Returns platform-wide cumulative environmental impact metrics.

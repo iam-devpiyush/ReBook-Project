@@ -262,8 +262,8 @@ export default function MyListingsPage({ onEdit, onCreateNew }: MyListingsPagePr
             {!loading && !error && listings.length > 0 && (
                 <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="My listings">
                     {listings.map(listing => {
-                        const book = listing.book ?? (listing as any).books;
-                        const coverImage = listing.images?.[0] ?? book?.cover_image ?? null;
+                        const book = listing.books ?? null;
+                        const coverImage = listing.images?.[0] ?? null;
                         const badge = STATUS_BADGE[listing.status] ?? 'bg-gray-100 text-gray-600';
                         const canEdit = EDITABLE_STATUSES.has(listing.status);
                         const canDelete = DELETABLE_STATUSES.has(listing.status);

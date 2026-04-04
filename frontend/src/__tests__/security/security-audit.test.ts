@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -204,10 +204,6 @@ describe('No Raw Card Data Accepted', () => {
   });
 
   it('assertNoCardData throws when card data is present', () => {
-    const { assertNoCardData: realAssertNoCardData } = vi.importActual<
-      typeof import('@/lib/security/encryption')
-    >('@/lib/security/encryption') as any;
-
     // The mock is a no-op; verify the real function would throw
     // by checking the mock was called with card-like data
     vi.mocked(assertNoCardData).mockImplementationOnce((body: unknown) => {
@@ -233,7 +229,7 @@ describe('Rate Limiting', () => {
   it('returns 429 when rate limit is exceeded on listing creation', async () => {
     vi.mocked(requireAuth).mockResolvedValueOnce(AUTH_USER as any);
     vi.mocked(applyRateLimit).mockReturnValueOnce(
-      new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 })
+      NextResponse.json({ error: 'Too many requests' }, { status: 429 }) as any
     );
 
     const res = await listingsPOST(req('http://localhost/api/listings', 'POST', {}));
@@ -243,7 +239,7 @@ describe('Rate Limiting', () => {
   it('returns 429 when rate limit is exceeded on order creation', async () => {
     vi.mocked(requireAuth).mockResolvedValueOnce(AUTH_USER as any);
     vi.mocked(applyRateLimit).mockReturnValueOnce(
-      new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 })
+      NextResponse.json({ error: 'Too many requests' }, { status: 429 }) as any
     );
 
     const res = await ordersPOST(req('http://localhost/api/orders', 'POST', {}));

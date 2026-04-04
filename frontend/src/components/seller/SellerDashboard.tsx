@@ -31,7 +31,7 @@ function statusLabel(s: string) {
     return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export default function SellerDashboard({ userId, onNavigate }: SellerDashboardProps) {
+export default function SellerDashboard({ userId, onNavigate: _onNavigate }: SellerDashboardProps) {
     const [listings, setListings] = useState<SellerListing[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -52,9 +52,10 @@ export default function SellerDashboard({ userId, onNavigate }: SellerDashboardP
             const allListings: SellerListing[] = listingsJson.data ?? [];
             setListings(allListings);
 
-            // Compute earnings from delivered orders
-            const orders = (ordersJson.data ?? []) as Array<{ status: string; seller_payout?: number; price?: number }>;
+            // Compute earnings only from orders where this user is the seller
+            const orders = (ordersJson.data ?? []) as Array<{ status: string; seller_payout?: number; price?: number; seller_id?: string }>;
             const earned = orders
+                .filter(o => o.seller_id === userId)
                 .filter(o => o.status === 'delivered' || o.status === 'paid' || o.status === 'shipped')
                 .reduce((sum, o) => sum + (o.seller_payout ?? (o.price ?? 0) * 0.875), 0);
             setTotalEarnings(earned);
@@ -169,7 +170,7 @@ export default function SellerDashboard({ userId, onNavigate }: SellerDashboardP
                 ) : (
                     <ul className="divide-y divide-gray-100">
                         {filtered.map(listing => {
-                            const book = listing.book ?? (listing as any).books;
+                            const book = listing.books ?? null;
                             const badge = STATUS_BADGE[listing.status] ?? 'bg-gray-100 text-gray-600';
                             const payout = Math.round(listing.final_price * 0.875);
 
@@ -177,9 +178,9 @@ export default function SellerDashboard({ userId, onNavigate }: SellerDashboardP
                                 <li key={listing.id} className="flex items-center gap-4 px-4 py-3 hover:bg-gray-50 transition-colors">
                                     {/* Cover */}
                                     <div className="w-12 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
-                                        {(listing.images?.[0] || book?.cover_image) ? (
+                                        {listing.images?.[0] ? (
                                             <img
-                                                src={listing.images?.[0] ?? book?.cover_image}
+                                                src={listing.images[0]}
                                                 alt={book?.title ?? ''}
                                                 className="w-full h-full object-cover"
                                             />

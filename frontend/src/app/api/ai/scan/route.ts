@@ -1,7 +1,8 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { requireAuth } from '@/lib/auth/middleware';
-import { fetchBookMetadata, fetchPriceViaGemini } from '@/lib/ai-scanner/metadata-fetcher';
+import { fetchBookMetadata } from '@/lib/ai-scanner/metadata-fetcher';
 import { analyzeBookCondition, type ConditionAnalysis } from '@/lib/ai-scanner/condition-analyzer';
 import { extractBookDataFromImages } from '@/lib/ai-scanner/gemini';
 
@@ -119,20 +120,74 @@ export async function POST(request: NextRequest) {
       bookMetadata = await fetchBookMetadata(detectedISBN).catch(() => null);
     }
 
-    // If no ISBN but Gemini extracted title+author, still try to get price via Gemini
+    // If no ISBN but Gemini extracted title+author, try Google Books + web search
     if (!bookMetadata && geminiData?.title && geminiData?.author && !geminiData.original_price_inr) {
-      const priceData = await fetchPriceViaGemini(geminiData.title, geminiData.author, null).catch(() => null);
-      if (priceData) {
-        geminiData.original_price_inr = priceData.price;
+      const titlePrices: number[] = [];
+      try {
+        const queries = [
+          `intitle:"${geminiData.title}" inauthor:"${geminiData.author}"`,
+          `intitle:"${geminiData.title}"`,
+        ];
+        for (const q of queries) {
+          const res = await fetch(
+            `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&country=IN&maxResults=20`
+          );
+          if (res.ok) {
+            const data = await res.json();
+            for (const item of data.items ?? []) {
+              const si = item.saleInfo;
+              const entry = si?.retailPrice ?? si?.listPrice;
+              if (entry?.amount > 0) {
+                const p = entry.currencyCode === 'INR'
+                  ? Math.round(entry.amount)
+                  : entry.currencyCode === 'USD'
+                  ? Math.round(entry.amount * 84)
+                  : null;
+                if (p && p >= 50 && p <= 15000) titlePrices.push(p);
+              }
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
+      // If Google Books has no price, try Gemini web search
+      if (titlePrices.length === 0) {
+        try {
+          const { GoogleGenerativeAI } = await import('@google/generative-ai');
+          const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+          const model = genAI.getGenerativeModel({
+            model: 'gemini-2.0-flash',
+            tools: [{ googleSearch: {} } as any],
+          });
+          const prompt = `What is the MRP of "${geminiData.title}" by ${geminiData.author} Indian edition? Search Flipkart and Amazon India. Reply ONLY with JSON: {"price_inr": <integer>}`;
+          const result = await model.generateContent(prompt);
+          const text = result.response.text().replace(/```json|```/g, '');
+          const match = text.match(/\{[\s\S]*?\}/);
+          if (match) {
+            const parsed = JSON.parse(match[0]);
+            if (parsed.price_inr) {
+              const p = Math.round(Number(parsed.price_inr));
+              if (p >= 50 && p <= 15000) titlePrices.push(p);
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (titlePrices.length > 0) {
+        const sorted = [...titlePrices].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        const medianPrice = sorted.length % 2 === 0
+          ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+          : sorted[mid];
+        geminiData.original_price_inr = medianPrice;
       }
     }
 
-    // Merge: prefer Gemini data for price (it reads the cover MRP directly),
-    // prefer Google Books for description and cover image
+    // Merge: prefer Gemini cover price (read from image), then metadata fetcher price
     const originalPrice =
-      geminiData?.original_price_inr ??   // MRP from cover (most accurate)
-      bookMetadata?.original_price ??      // Google Books real price
-      null;                                // never estimate — leave null
+      geminiData?.original_price_inr ??   // MRP read directly from cover image
+      bookMetadata?.original_price ??      // median of Google Books prices
+      null;
 
     const priceSource =
       geminiData?.original_price_inr

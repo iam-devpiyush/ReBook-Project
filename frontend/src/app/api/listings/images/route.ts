@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 /**
  * Image Upload API Route
  * 

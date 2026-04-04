@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 /**
  * API Route: /api/listings
  * POST: Create a new listing with admin approval required

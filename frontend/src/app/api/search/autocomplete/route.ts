@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 /**
  * API Route: /api/search/autocomplete
  * Requirements: Search autocomplete

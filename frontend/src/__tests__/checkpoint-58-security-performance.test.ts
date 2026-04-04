@@ -42,7 +42,6 @@ import {
 // Error handling
 // ---------------------------------------------------------------------------
 import {
-    AppError,
     ValidationError,
     UnauthorizedError,
     ForbiddenError,

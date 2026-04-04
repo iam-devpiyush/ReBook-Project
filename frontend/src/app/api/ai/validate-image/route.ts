@@ -1,14 +1,18 @@
+export const dynamic = 'force-dynamic';
 /**
  * POST /api/ai/validate-image
  *
- * Validates image file type and size.
- * Accepts { url: string } for remote URLs or { dataUrl: string } for data URLs.
+ * Validates an uploaded book image:
+ * 1. Checks MIME type (JPEG/PNG/WebP only) and size (≤5MB)
+ * 2. Uses Gemini Vision to verify the image matches the expected step
+ *    (front_cover, back_cover, spine, pages)
  *
- * Requirements: 1.1, 1.2, 1.5
+ * Returns { valid: boolean, reason: string, api_unavailable?: boolean }
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
+import { validateBookImage } from '@/lib/ai-scanner/gemini';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -20,8 +24,7 @@ function parseMimeFromDataUrl(dataUrl: string): string | null {
 
 function getBase64SizeBytes(dataUrl: string): number {
   const base64 = dataUrl.split(',')[1] ?? '';
-  // Each base64 char represents 6 bits; 4 chars = 3 bytes
-  const padding = (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
   return Math.floor((base64.length * 3) / 4) - padding;
 }
 
@@ -29,83 +32,47 @@ export async function POST(request: NextRequest) {
   const authResult = await requireAuth(request);
   if (!authResult.success) return authResult.response;
 
-  let body: { url?: string; dataUrl?: string };
+  let body: { image_url?: string; image_type?: string; dataUrl?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { url, dataUrl } = body ?? {};
+  // Support both calling conventions:
+  // - BookImageUploader sends { image_url: dataUrl, image_type }
+  // - Direct calls may send { dataUrl }
+  const imageUrl = body.image_url ?? body.dataUrl;
+  const imageType = body.image_type ?? 'front_cover';
 
-  if (!url && !dataUrl) {
-    return NextResponse.json({ error: 'url or dataUrl is required' }, { status: 400 });
+  if (!imageUrl) {
+    return NextResponse.json({ error: 'image_url is required' }, { status: 400 });
   }
 
-  // --- Validate data URL ---
-  if (dataUrl) {
-    const mimeType = parseMimeFromDataUrl(dataUrl);
-    if (!mimeType) {
-      return NextResponse.json(
-        { error: 'Invalid data URL format — could not determine MIME type' },
-        { status: 400 }
-      );
+  // ── Step 1: Fast MIME + size check ──────────────────────────────────────────
+  if (imageUrl.startsWith('data:')) {
+    const mimeType = parseMimeFromDataUrl(imageUrl);
+    if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+      return NextResponse.json({
+        valid: false,
+        reason: `Unsupported file type. Please upload a JPEG, PNG, or WebP image.`,
+      });
     }
-    if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
-      return NextResponse.json(
-        { error: `Unsupported image type "${mimeType}". Only JPEG, PNG, and WebP are accepted.` },
-        { status: 400 }
-      );
-    }
-    const sizeBytes = getBase64SizeBytes(dataUrl);
+    const sizeBytes = getBase64SizeBytes(imageUrl);
     if (sizeBytes > MAX_SIZE_BYTES) {
-      return NextResponse.json(
-        { error: `Image exceeds the 5 MB size limit (${(sizeBytes / 1024 / 1024).toFixed(2)} MB).` },
-        { status: 400 }
-      );
+      return NextResponse.json({
+        valid: false,
+        reason: `Image is too large (${(sizeBytes / 1024 / 1024).toFixed(1)} MB). Maximum size is 5 MB.`,
+      });
     }
-    return NextResponse.json({ success: true, mimeType, sizeBytes });
   }
 
-  // --- Validate remote URL via HEAD request ---
-  if (url) {
-    let headResponse: Response;
-    try {
-      headResponse = await fetch(url, { method: 'HEAD' });
-    } catch (err: any) {
-      return NextResponse.json(
-        { error: `Image URL is not accessible: ${err?.message ?? 'network error'}` },
-        { status: 400 }
-      );
-    }
+  // ── Step 2: Gemini Vision content validation ─────────────────────────────────
+  const result = await validateBookImage(imageUrl, imageType);
 
-    if (!headResponse.ok) {
-      return NextResponse.json(
-        { error: `Image URL returned HTTP ${headResponse.status} — not accessible.` },
-        { status: 400 }
-      );
-    }
-
-    const contentType = headResponse.headers.get('content-type') ?? '';
-    const mimeType = contentType.split(';')[0].trim();
-    if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
-      return NextResponse.json(
-        { error: `Unsupported image type "${mimeType}" at URL. Only JPEG, PNG, and WebP are accepted.` },
-        { status: 400 }
-      );
-    }
-
-    const contentLength = headResponse.headers.get('content-length');
-    if (contentLength) {
-      const sizeBytes = parseInt(contentLength, 10);
-      if (sizeBytes > MAX_SIZE_BYTES) {
-        return NextResponse.json(
-          { error: `Image at URL exceeds the 5 MB size limit (${(sizeBytes / 1024 / 1024).toFixed(2)} MB).` },
-          { status: 400 }
-        );
-      }
-    }
-
-    return NextResponse.json({ success: true, mimeType, url });
-  }
+  return NextResponse.json({
+    valid: result.valid,
+    reason: result.reason,
+    api_unavailable: result.api_unavailable ?? false,
+  });
 }

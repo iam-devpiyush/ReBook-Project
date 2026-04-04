@@ -25,6 +25,35 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type DrillDownType = 'all_listings' | 'sold_listings' | 'active_listings' | 'users' | null;
+
+interface DrillDownListing {
+  id: string;
+  status: string;
+  final_price: number;
+  condition_score: number;
+  created_at: string;
+  images: string[] | null;
+  city: string | null;
+  state: string | null;
+  book: { title: string; author: string; isbn?: string } | null;
+  seller: { name: string; email: string } | null;
+}
+
+interface DrillDownUser {
+  id: string;
+  name: string | null;
+  email: string;
+  role: string;
+  books_sold: number;
+  books_bought: number;
+  rating: number | null;
+  city: string | null;
+  state: string | null;
+  created_at: string;
+  is_active: boolean;
+}
+
 interface PendingListing {
   id: string;
   status: string;
@@ -71,20 +100,26 @@ function MetricCard({
   subtitle,
   icon,
   color,
+  onClick,
 }: {
   title: string;
   value: string | number;
   subtitle?: string;
   icon: React.ReactNode;
   color: string;
+  onClick?: () => void;
 }) {
   return (
-    <div className="bg-white rounded-lg shadow p-6 flex items-start gap-4">
+    <div
+      className={`bg-white rounded-lg shadow p-6 flex items-start gap-4 ${onClick ? 'cursor-pointer hover:shadow-md hover:ring-2 hover:ring-indigo-200 transition-all' : ''}`}
+      onClick={onClick}
+    >
       <div className={`p-3 rounded-full ${color}`}>{icon}</div>
       <div>
         <p className="text-sm font-medium text-gray-500">{title}</p>
         <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
         {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
+        {onClick && <p className="text-xs text-indigo-500 mt-1 font-medium">Click to view →</p>}
       </div>
     </div>
   );
@@ -125,6 +160,41 @@ export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Drill-down panel state
+  const [drillDown, setDrillDown] = useState<DrillDownType>(null);
+  const [drillListings, setDrillListings] = useState<DrillDownListing[]>([]);
+  const [drillUsers, setDrillUsers] = useState<DrillDownUser[]>([]);
+  const [drillLoading, setDrillLoading] = useState(false);
+
+  const openDrillDown = async (type: DrillDownType) => {
+    setDrillDown(type);
+    setDrillLoading(true);
+    try {
+      if (type === 'users') {
+        const res = await fetch('/api/admin/users?pageSize=200');
+        const json = await res.json();
+        setDrillUsers(json.data ?? []);
+      } else {
+        const statusMap: Record<string, string> = {
+          all_listings: '',
+          sold_listings: 'sold',
+          active_listings: 'active',
+        };
+        const status = statusMap[type ?? ''];
+        const url = status
+          ? `/api/admin/listings?status=${status}&pageSize=200`
+          : `/api/admin/listings?pageSize=200`;
+        const res = await fetch(url);
+        const json = await res.json();
+        setDrillListings(json.data ?? []);
+      }
+    } catch {
+      // silently fail — show empty state
+    } finally {
+      setDrillLoading(false);
+    }
+  };
 
   // Moderation state
   const [pendingListings, setPendingListings] = useState<PendingListing[]>([]);
@@ -261,18 +331,21 @@ export default function AdminDashboard() {
             value={stats.total_books_listed.toLocaleString()}
             icon={<BookIcon />}
             color="bg-indigo-100 text-indigo-600"
+            onClick={() => openDrillDown('all_listings')}
           />
           <MetricCard
             title="Books Sold"
             value={stats.total_books_sold.toLocaleString()}
             icon={<SoldIcon />}
             color="bg-green-100 text-green-600"
+            onClick={() => openDrillDown('sold_listings')}
           />
           <MetricCard
             title="Active Listings"
             value={stats.active_listings.toLocaleString()}
             icon={<ActiveIcon />}
             color="bg-yellow-100 text-yellow-600"
+            onClick={() => openDrillDown('active_listings')}
           />
           <MetricCard
             title="Total Users"
@@ -280,6 +353,7 @@ export default function AdminDashboard() {
             subtitle={`${stats.total_sellers} sellers · ${stats.total_buyers} buyers`}
             icon={<UsersIcon />}
             color="bg-purple-100 text-purple-600"
+            onClick={() => openDrillDown('users')}
           />
         </div>
       </section>
@@ -566,6 +640,128 @@ export default function AdminDashboard() {
           </div>
         </div>
       </section>
+
+      {/* ── Drill-down slide-over panel ── */}
+      {drillDown && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/40 z-40"
+            onClick={() => setDrillDown(null)}
+          />
+          {/* Panel */}
+          <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white z-50 shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900 text-lg">
+                {drillDown === 'all_listings' && 'All Listed Books'}
+                {drillDown === 'sold_listings' && 'Books Sold'}
+                {drillDown === 'active_listings' && 'Active Listings'}
+                {drillDown === 'users' && 'All Users'}
+              </h2>
+              <button
+                onClick={() => setDrillDown(null)}
+                className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {drillLoading ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+                </div>
+              ) : drillDown === 'users' ? (
+                /* Users table */
+                drillUsers.length === 0 ? (
+                  <p className="text-center text-gray-400 py-12 text-sm">No users found</p>
+                ) : (
+                  <div className="space-y-3">
+                    {drillUsers.map(u => (
+                      <div key={u.id} className="bg-gray-50 rounded-xl p-4 text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-gray-900">{u.name ?? '—'}</p>
+                            <p className="text-gray-500 text-xs truncate">{u.email}</p>
+                          </div>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                            u.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                            u.role === 'seller' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>{u.role}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3 mt-3 text-xs text-gray-600">
+                          <div><span className="text-gray-400 block">Books Sold</span>{u.books_sold ?? 0}</div>
+                          <div><span className="text-gray-400 block">Books Bought</span>{u.books_bought ?? 0}</div>
+                          <div><span className="text-gray-400 block">Rating</span>{u.rating ? `${u.rating}/5` : '—'}</div>
+                          <div><span className="text-gray-400 block">Location</span>{[u.city, u.state].filter(Boolean).join(', ') || '—'}</div>
+                          <div><span className="text-gray-400 block">Joined</span>{new Date(u.created_at).toLocaleDateString('en-IN')}</div>
+                          <div><span className="text-gray-400 block">Status</span>
+                            <span className={u.is_active ? 'text-green-600' : 'text-red-500'}>
+                              {u.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                /* Listings table */
+                drillListings.length === 0 ? (
+                  <p className="text-center text-gray-400 py-12 text-sm">No listings found</p>
+                ) : (
+                  <div className="space-y-3">
+                    {drillListings.map(l => (
+                      <div key={l.id} className="bg-gray-50 rounded-xl p-4 flex gap-3 text-sm">
+                        {/* Thumbnail */}
+                        <div className="w-10 h-14 bg-gray-200 rounded overflow-hidden flex-shrink-0">
+                          {l.images?.[0] ? (
+                            <img src={l.images[0]} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">📚</div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900 truncate">{l.book?.title ?? 'Untitled'}</p>
+                          <p className="text-xs text-gray-500 truncate">{l.book?.author}</p>
+                          {l.book?.isbn && <p className="text-xs text-gray-400">ISBN: {l.book.isbn}</p>}
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-gray-600">
+                            <span>₹{l.final_price.toLocaleString('en-IN')}</span>
+                            <span>Condition: {l.condition_score}/5</span>
+                            <span className={`font-medium ${
+                              l.status === 'active' ? 'text-green-600' :
+                              l.status === 'sold' ? 'text-blue-600' :
+                              l.status === 'pending_approval' ? 'text-yellow-600' :
+                              'text-gray-500'
+                            }`}>{l.status.replace('_', ' ')}</span>
+                            {l.seller && <span className="text-gray-400">by {l.seller.name ?? l.seller.email}</span>}
+                            {l.city && <span className="text-gray-400">{l.city}, {l.state}</span>}
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-400 flex-shrink-0">
+                          {new Date(l.created_at).toLocaleDateString('en-IN')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* Footer count */}
+            <div className="border-t border-gray-100 px-6 py-3 text-xs text-gray-400">
+              {drillDown === 'users'
+                ? `${drillUsers.length} users`
+                : `${drillListings.length} listings`}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Toast notification ── */}
       {toast && (

@@ -124,7 +124,7 @@ export default function BookImageUploader({ onComplete, onCancel }: Props) {
     // Resize to max 800px before sending to Gemini (avoids rate limit / payload issues)
     const resizedUrl = await resizeImageForValidation(dataUrl, 800);
 
-    // Auto-validate with Gemini
+    // Auto-validate with Gemini Vision — checks image matches the expected step
     setValidation('validating');
     try {
       const res = await fetch('/api/ai/validate-image', {
@@ -133,23 +133,26 @@ export default function BookImageUploader({ onComplete, onCancel }: Props) {
         body: JSON.stringify({ image_url: resizedUrl, image_type: currentStep.key }),
       });
       const json = await res.json();
+
       if (json.valid) {
         setValidation('valid');
         setValidationReason(json.reason || 'Image looks good');
         setApiUnavailable(false);
       } else if (json.api_unavailable) {
-        setValidation('invalid');
+        // Gemini unavailable — allow the image through so users aren't blocked
+        setValidation('valid');
+        setValidationReason('Image accepted (AI validation unavailable)');
         setApiUnavailable(true);
-        setValidationReason(json.reason || 'AI validation service is unavailable.');
       } else {
         setValidation('invalid');
         setApiUnavailable(false);
-        setValidationReason(json.reason || 'This does not look like the correct image type.');
+        setValidationReason(json.reason || 'This does not look like the correct image. Please upload the correct photo.');
       }
     } catch {
-      setValidation('invalid');
-      setApiUnavailable(true);
-      setValidationReason('Could not reach the validation service. Please check your connection and try again.');
+      // Network error — allow through
+      setValidation('valid');
+      setValidationReason('Image accepted');
+      setApiUnavailable(false);
     }
   }, [currentStep.key]);
 

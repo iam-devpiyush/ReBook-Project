@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 /**
  * Sign Out API Route
  * 

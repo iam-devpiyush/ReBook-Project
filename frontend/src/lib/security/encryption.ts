@@ -15,9 +15,8 @@
 // PCI-DSS compliance guards (Requirement 23.4)
 // ---------------------------------------------------------------------------
 
-/** Patterns that look like raw card numbers or CVV values */
+/** Patterns that look like raw card numbers */
 const CARD_NUMBER_PATTERN = /\b(?:\d[ -]?){13,19}\b/;
-const CVV_PATTERN = /\b\d{3,4}\b/;
 
 /**
  * Throw if the payload contains anything that looks like a raw card number.

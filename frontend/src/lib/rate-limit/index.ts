@@ -122,7 +122,7 @@ export function getClientIp(request: NextRequest): string {
  * @returns NextResponse with 429 if exceeded, otherwise null (proceed)
  */
 export function applyRateLimit(
-    request: NextRequest,
+    _request: NextRequest,
     key: string,
     config: RateLimitConfig
 ): NextResponse | null {
