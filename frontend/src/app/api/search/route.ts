@@ -28,6 +28,25 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/** Group listings by book_id + condition_score, keeping lowest price and stock count */
+function groupListings(hits: ListingDocument[]): (ListingDocument & { stock_count: number })[] {
+  const groups = new Map<string, ListingDocument & { stock_count: number }>();
+  for (const hit of hits) {
+    const key = `${hit.book_id}__${hit.condition_score}`;
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, { ...hit, stock_count: 1 });
+    } else {
+      existing.stock_count += 1;
+      // Keep the lowest price representative
+      if (hit.final_price < existing.final_price) {
+        groups.set(key, { ...hit, stock_count: existing.stock_count });
+      }
+    }
+  }
+  return Array.from(groups.values());
+}
+
 async function searchListings(options: {
   query: string;
   filters?: SearchFilters;
@@ -249,14 +268,17 @@ export async function GET(request: NextRequest) {
 
     const { data: searchResult, usedFallback, fallbackReason } = result;
 
+    // Group by book_id + condition_score to deduplicate listings
+    const groupedHits = groupListings(searchResult.hits);
+
     const responseData = {
       success: true,
-      data: searchResult.hits,
+      data: groupedHits,
       pagination: {
         page,
         page_size: pageSize,
-        total_hits: searchResult.estimatedTotalHits,
-        total_pages: Math.ceil(searchResult.estimatedTotalHits / pageSize),
+        total_hits: groupedHits.length,
+        total_pages: Math.ceil(groupedHits.length / pageSize),
       },
       processing_time_ms: elapsedMs,
       cached: false,

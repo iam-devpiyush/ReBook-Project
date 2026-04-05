@@ -19,7 +19,7 @@ const CONDITION_LABELS: Record<number, { label: string; color: string }> = {
 };
 
 
-export default function ListingCard({ listing, stockCount, distanceKm, onClick }: ListingCardProps) {
+export default function ListingCard({ listing, stockCount: stockCountProp, distanceKm, onClick }: ListingCardProps) {
   const fmt = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
   const condition = CONDITION_LABELS[listing.condition_score] ?? {
     label: `Score ${listing.condition_score}`,
@@ -28,6 +28,7 @@ export default function ListingCard({ listing, stockCount, distanceKm, onClick }
   const treesPerBook = treesFromTitle(listing.title);
   const originalPrice = (listing as any).original_price as number | undefined;
   const coverImage = listing.images?.[0] ?? null;
+  const stockCount = listing.stock_count ?? stockCountProp;
 
   return (
     <article
@@ -68,6 +69,11 @@ export default function ListingCard({ listing, stockCount, distanceKm, onClick }
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-900/70 text-white">
               {stockCount} in stock
             </span>
+          </div>
+        )}
+        {stockCount === 0 && (
+          <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
+            <span className="text-xs font-bold text-red-600 bg-white px-3 py-1 rounded-full border border-red-200">Out of Stock</span>
           </div>
         )}
       </div>

@@ -31,6 +31,7 @@ export interface ListingDocument {
   };
   created_at: string;
   updated_at: string;
+  stock_count?: number;
 }
 
 export interface UserLocation {

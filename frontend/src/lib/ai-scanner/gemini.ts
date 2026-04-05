@@ -11,7 +11,37 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const GEMINI_MODEL = 'gemini-2.5-flash-lite';
+
+// Models in priority order — rotate on 429/rate limit errors
+const GEMINI_MODELS = [
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+];
+
+/** Call a Gemini model with automatic fallback on rate limit errors */
+async function withModelFallback<T>(
+  fn: (modelName: string) => Promise<T>
+): Promise<T> {
+  let lastError: unknown;
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      return await fn(modelName);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isRateLimit = msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota');
+      if (isRateLimit) {
+        console.warn(`[Gemini] ${modelName} rate limited, trying next model...`);
+        lastError = err;
+        continue;
+      }
+      // Non-rate-limit error — don't retry with different model
+      throw err;
+    }
+  }
+  throw lastError;
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -103,14 +133,15 @@ export async function validateBookImage(
   imageType: string
 ): Promise<ImageValidationResult> {
   try {
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
     const part = await urlToPart(imageUrl);
     const prompt = IMAGE_TYPE_PROMPTS[imageType] || IMAGE_TYPE_PROMPTS.front_cover;
 
-    const result = await model.generateContent([prompt, part]);
-    const text = result.response.text().trim();
+    const text = await withModelFallback(async (modelName) => {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent([prompt, part]);
+      return result.response.text().trim();
+    });
 
-    // Parse JSON from response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
@@ -120,14 +151,11 @@ export async function validateBookImage(
       };
     }
 
-    // Fallback: look for true/false in text
     const isValid = /\btrue\b/i.test(text) && !/\bfalse\b/i.test(text);
     return { valid: isValid, reason: isValid ? 'Image looks good' : 'Could not verify image type' };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // Log the FULL error so we can diagnose
     console.error('[Gemini validation] FULL ERROR:', msg);
-    
     if (msg.includes('limit: 0') || msg.includes('RESOURCE_EXHAUSTED')) {
       return { valid: false, api_unavailable: true, reason: 'AI validation quota exceeded. Please enable billing at console.cloud.google.com/billing' };
     }
@@ -178,14 +206,16 @@ export async function extractBookDataFromImages(
   };
 
   try {
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
     const [frontPart, backPart] = await Promise.all([
       urlToPart(frontCoverUrl),
       urlToPart(backCoverUrl),
     ]);
 
-    const result = await model.generateContent([EXTRACTION_PROMPT, frontPart, backPart]);
-    const text = result.response.text().trim();
+    const text = await withModelFallback(async (modelName) => {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent([EXTRACTION_PROMPT, frontPart, backPart]);
+      return result.response.text().trim();
+    });
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return empty;
