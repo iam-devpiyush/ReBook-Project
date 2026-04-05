@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import Link from 'next/link';
 import ListingCard from './ListingCard';
 import type { ListingDocument, SortBy } from '@/services/search.service';
 
@@ -172,12 +171,6 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
                 {loading ? 'Loading...' : `${totalResults.toLocaleString()} book${totalResults !== 1 ? 's' : ''} available`}
               </p>
             </div>
-            <Link
-              href="/search"
-              className={`${embedded ? 'inline-flex' : 'hidden sm:inline-flex'} items-center gap-1.5 text-sm font-medium text-green-600 hover:text-green-700`}
-            >
-              Browse Full Book Catalog →
-            </Link>
           </div>
 
           <form onSubmit={handleSearch} className="flex gap-2">
