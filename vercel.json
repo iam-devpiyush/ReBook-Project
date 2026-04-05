@@ -1,7 +1,6 @@
 {
     "version": 2,
     "name": "rebook-marketplace",
-    "rootDirectory": "frontend",
     "buildCommand": "npm run build",
     "outputDirectory": ".next",
     "installCommand": "npm install",
