@@ -1,6 +1,7 @@
 'use client';
 
 import type { ListingDocument } from '@/services/search.service';
+import { treesFromTitle } from '@/lib/eco/trees';
 
 interface ListingCardProps {
   listing: ListingDocument;
@@ -24,7 +25,7 @@ export default function ListingCard({ listing, stockCount, distanceKm, onClick }
     label: `Score ${listing.condition_score}`,
     color: 'bg-gray-100 text-gray-600',
   };
-  const treesPerBook = (1 / 30).toFixed(3);
+  const treesPerBook = treesFromTitle(listing.title);
   const originalPrice = (listing as any).original_price as number | undefined;
   const coverImage = listing.images?.[0] ?? null;
 

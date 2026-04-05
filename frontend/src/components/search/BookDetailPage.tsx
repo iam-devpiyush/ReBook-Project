@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import type { ListingWithBook } from '@/types/listing';
 import { useCart } from '@/lib/cart/CartContext';
+import { treesFromTitle } from '@/lib/eco/trees';
 
 interface EcoImpact {
   trees_saved: number;
@@ -78,7 +79,7 @@ export default function BookDetailPage({ listingId, onPlaceOrder: _onPlaceOrder,
   const officialCover = images[0] ?? null;
   const userPhotos = images.slice(1);
   const condition = CONDITION_LABELS[listing.condition_score] ?? { label: `Score ${listing.condition_score}`, color: 'bg-gray-100 text-gray-600' };
-  const treesPerBook = (1 / 30).toFixed(3);
+  const treesPerBook = treesFromTitle(listing.book?.title ?? '');
   const originalPrice = (listing as any).original_price as number | undefined;
   const savePct = originalPrice && originalPrice > listing.final_price
     ? Math.round((1 - listing.final_price / originalPrice) * 100)

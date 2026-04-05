@@ -25,16 +25,11 @@ export async function setupListingsIndex() {
   const client = getAdminClient();
 
   // Create index if it doesn't exist (primary key = id)
-  await client.createIndex('listings', { primaryKey: 'id' });
-
-  const index = client.index('listings');
-
-  // Wait for index to be ready
-  await index.waitForTask(
-    (await client.createIndex('listings', { primaryKey: 'id' })).taskUid
-  ).catch(() => {
+  await client.createIndex('listings', { primaryKey: 'id' }).catch(() => {
     // Index may already exist — that's fine
   });
+
+  const index = client.index('listings');
 
   // Configure searchable attributes (order matters — higher = more relevant)
   await index.updateSearchableAttributes([
@@ -139,8 +134,7 @@ export async function syncListingsFromSupabase(batchSize = 100) {
       updated_at: l.updated_at,
     }));
 
-    const task = await index.addDocuments(docs);
-    await index.waitForTask(task.taskUid);
+    await index.addDocuments(docs);
 
     totalIndexed += docs.length;
     offset += batchSize;

@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/lib/auth/useAuth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ interface EarningsOrder {
     platform_commission: number;
     payment_fees: number;
     seller_payout: number;
+    seller_id: string;
     status: string;
     created_at: string;
     listing?: {
@@ -104,6 +106,7 @@ function LoadingSkeleton() {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function EarningsPage({ orders: propOrders }: EarningsPageProps) {
+    const { user } = useAuth();
     const [orders, setOrders] = useState<EarningsOrder[]>(propOrders ?? []);
     const [loading, setLoading] = useState(!propOrders);
     const [error, setError] = useState<string | null>(null);
@@ -132,8 +135,10 @@ export default function EarningsPage({ orders: propOrders }: EarningsPageProps) 
         fetchOrders();
     }, [fetchOrders]);
 
-    // Compute summary from completed orders
-    const completedOrders = orders.filter(o => COMPLETED_STATUSES.has(o.status));
+    // Compute summary from completed orders where user is the seller
+    const completedOrders = orders.filter(o =>
+        COMPLETED_STATUSES.has(o.status) && o.seller_id === user?.id
+    );
     const summary: EarningsSummary = completedOrders.reduce(
         (acc, order) => {
             const { total, commission, fees, payout } = deriveBreakdown(order);
@@ -201,7 +206,7 @@ export default function EarningsPage({ orders: propOrders }: EarningsPageProps) 
             <section>
                 <h2 className="text-lg font-semibold text-gray-800 mb-4">Order Breakdown</h2>
 
-                {orders.length === 0 ? (
+                {orders.filter(o => o.seller_id === user?.id).length === 0 ? (
                     <div className="text-center py-16 text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
                         <p className="text-3xl mb-2" aria-hidden="true">💰</p>
                         <p className="font-medium text-gray-700">No earnings yet</p>
@@ -221,7 +226,7 @@ export default function EarningsPage({ orders: propOrders }: EarningsPageProps) 
 
                             {/* Order rows */}
                             <ul aria-label="Earnings breakdown by order">
-                                {orders.map((order, idx) => {
+                                {orders.filter(o => o.seller_id === user?.id).map((order, idx) => {
                                     const book = order.listing?.book;
                                     const { total, commission, fees, payout } = deriveBreakdown(order);
                                     const isCompleted = COMPLETED_STATUSES.has(order.status);
