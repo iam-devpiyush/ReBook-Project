@@ -16,7 +16,7 @@ export interface CacheEntry<T> {
 
 /** TTL constants (milliseconds) */
 export const TTL = {
-    SEARCH: 5 * 60 * 1000,        // 5 minutes
+    SEARCH: 30 * 1000,             // 30 seconds — short to avoid stale listings
     BOOK_DETAIL: 60 * 60 * 1000,  // 1 hour
     CATEGORIES: 24 * 60 * 60 * 1000, // 24 hours
     PLATFORM_STATS: 15 * 60 * 1000,  // 15 minutes
