@@ -28,20 +28,16 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Group listings by book_id + condition_score, keeping lowest price and stock count */
+/** Group listings by book_id + condition_score + final_price, counting stock */
 function groupListings(hits: ListingDocument[]): (ListingDocument & { stock_count: number })[] {
   const groups = new Map<string, ListingDocument & { stock_count: number }>();
   for (const hit of hits) {
-    const key = `${hit.book_id}__${hit.condition_score}`;
+    const key = `${hit.book_id}__${hit.condition_score}__${hit.final_price}`;
     const existing = groups.get(key);
     if (!existing) {
       groups.set(key, { ...hit, stock_count: 1 });
     } else {
       existing.stock_count += 1;
-      // Keep the lowest price representative
-      if (hit.final_price < existing.final_price) {
-        groups.set(key, { ...hit, stock_count: existing.stock_count });
-      }
     }
   }
   return Array.from(groups.values());
