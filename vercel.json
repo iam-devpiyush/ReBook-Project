@@ -8,6 +8,17 @@
     "regions": [
         "bom1"
     ],
+    "crons": [
+        {
+            "path": "/api/health",
+            "schedule": "0 0 * * *"
+        }
+    ],
+    "functions": {
+        "src/app/api/ai/scan/route.ts": {
+            "maxDuration": 60
+        }
+    },
     "headers": [
         {
             "source": "/(.*)",
