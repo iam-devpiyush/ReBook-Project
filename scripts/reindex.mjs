@@ -78,8 +78,9 @@ function buildDoc(l) {
       latitude: l.seller?.latitude ?? null,
       longitude: l.seller?.longitude ?? null,
     },
-    created_at: l.created_at,
-    updated_at: l.updated_at,
+    // Store as Unix timestamp so Meilisearch sorts numerically, not lexicographically
+    created_at: l.created_at ? Math.floor(new Date(l.created_at).getTime() / 1000) : 0,
+    updated_at: l.updated_at ? Math.floor(new Date(l.updated_at).getTime() / 1000) : 0,
   };
 }
 

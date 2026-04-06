@@ -113,8 +113,8 @@ export async function PUT(
         latitude: updated.seller?.latitude ?? updated.latitude ?? null,
         longitude: updated.seller?.longitude ?? updated.longitude ?? null,
       },
-      created_at: updated.created_at,
-      updated_at: updated.updated_at,
+      created_at: updated.created_at ? Math.floor(new Date(updated.created_at).getTime() / 1000) : 0,
+      updated_at: updated.updated_at ? Math.floor(new Date(updated.updated_at).getTime() / 1000) : 0,
     };
 
     let meiliSynced = false;
