@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { appCache, TTL } from '@/lib/cache';
+import { withTimeout } from '@/lib/timeout';
 
 export interface Category {
   id: string;
@@ -59,10 +60,14 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServerClient();
 
-    const { data: categories, error } = await supabase
-      .from('categories')
-      .select('id, name, type, parent_id, metadata, created_at, updated_at')
-      .order('name', { ascending: true });
+    const { data: categories, error } = await withTimeout(
+      supabase
+        .from('categories')
+        .select('id, name, type, parent_id, metadata, created_at, updated_at')
+        .order('name', { ascending: true }),
+      4000,
+      'categories'
+    ).catch(() => ({ data: [], error: new Error('Timeout') }));
 
     if (error) {
       console.error('Error fetching categories:', error);

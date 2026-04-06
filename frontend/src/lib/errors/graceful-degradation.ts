@@ -7,6 +7,7 @@
 
 import { ServiceUnavailableError, PaymentError } from './index';
 import { withRetry } from './fallbacks';
+import { withTimeout } from '@/lib/timeout';
 
 // ---------------------------------------------------------------------------
 // OAuth provider unavailability  (Requirement 19.1)
@@ -78,12 +79,18 @@ export async function withMeilisearchFallback<T>(
     supabaseFallback: () => Promise<T>
 ): Promise<SearchFallbackResult<T>> {
     try {
-        const data = await withRetry(meilisearchFn, { maxAttempts: 2, baseDelayMs: 200 });
+        // 5s timeout on Meilisearch — if it's cold/slow, fall through immediately
+        const data = await withTimeout(
+            withRetry(meilisearchFn, { maxAttempts: 1, baseDelayMs: 0 }),
+            5000,
+            'Meilisearch'
+        );
         return { data, usedFallback: false };
     } catch (err) {
-        console.warn('[Search] Meilisearch unavailable, falling back to Supabase:', err);
+        console.warn('[Search] Meilisearch unavailable or timed out, falling back to Supabase:', err);
         try {
-            const data = await supabaseFallback();
+            // 8s timeout on Supabase fallback
+            const data = await withTimeout(supabaseFallback(), 8000, 'Supabase search fallback');
             return {
                 data,
                 usedFallback: true,

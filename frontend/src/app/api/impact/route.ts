@@ -11,6 +11,7 @@ export const revalidate = 300; // 5 minutes ISR — rebuilt at most every 5 min
  */
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withTimeout } from '@/lib/timeout';
 
 // Use service-role client — no cookies needed, this is a public read-only endpoint
 function getSupabase() {
@@ -24,11 +25,15 @@ export async function GET() {
     try {
         const supabase = getSupabase() as any;
 
-        // Try platform_stats first (populated by DB triggers)
-        const { data: stats } = await supabase
-            .from('platform_stats')
-            .select('trees_saved, water_saved_liters, co2_reduced_kg, total_books_sold')
-            .limit(10);
+        // 3s timeout — return zeros immediately if Supabase is slow
+        const { data: stats } = await withTimeout(
+            supabase
+                .from('platform_stats')
+                .select('trees_saved, water_saved_liters, co2_reduced_kg, total_books_sold')
+                .limit(10),
+            3000,
+            'platform_stats'
+        ).catch(() => ({ data: null }));
 
         let trees_saved = 0;
         let water_saved_liters = 0;
@@ -47,13 +52,17 @@ export async function GET() {
                 total_books_sold += Number(row.total_books_sold ?? 0);
             }
         } else {
-            // Fallback: count all non-cancelled orders (seed data uses paid/shipped/delivered)
-            const { count } = await supabase
-                .from('orders')
-                .select('id', { count: 'exact', head: true })
-                .neq('status', 'cancelled');
+            // Fallback: count all non-cancelled orders
+            const result = await withTimeout(
+                supabase
+                    .from('orders')
+                    .select('id', { count: 'exact', head: true })
+                    .neq('status', 'cancelled'),
+                3000,
+                'orders count'
+            ).catch(() => ({ count: 0 }));
 
-            total_books_sold = count ?? 0;
+            total_books_sold = result.count ?? 0;
             trees_saved = total_books_sold / 30;
             water_saved_liters = total_books_sold * 50;
             co2_reduced_kg = total_books_sold * 2.5;

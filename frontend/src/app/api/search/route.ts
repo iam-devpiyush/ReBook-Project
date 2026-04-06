@@ -14,6 +14,7 @@ import { applyRateLimit, getClientIp, SEARCH_RATE_LIMIT } from '@/lib/rate-limit
 import { withMeilisearchFallback } from '@/lib/errors/graceful-degradation';
 import { appCache, TTL, buildCacheKey } from '@/lib/cache';
 import { measurePerf, addTimingHeader } from '@/lib/monitoring/performance';
+import { withTimeout } from '@/lib/timeout';
 
 const meiliClient = new MeiliSearch({
   host: process.env.MEILISEARCH_HOST || 'http://localhost:7700',
@@ -197,72 +198,84 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ...cached as object, cached: true });
     }
 
-    // Execute search with Meilisearch → Supabase fallback (Requirement 19.5)
-    const { result, elapsedMs } = await measurePerf('GET /api/search', 'SEARCH', () =>
-      withMeilisearchFallback(
-        () => searchListings({ query, filters, userLocation, sortBy, limit: pageSize, offset }),
-        async () => {
-          // Supabase fallback: basic text search on title/author
-          const { createClient } = await import('@supabase/supabase-js');
-          const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!
-          );
+    // Execute search — hard 10s timeout, returns empty results instead of hanging
+    let searchResult: { hits: ListingDocument[]; estimatedTotalHits: number; processingTimeMs: number };
+    let elapsedMs = 0;
+    let usedFallback = false;
+    let fallbackReason: string | undefined;
 
-          // First get matching book IDs if there's a text query
-          let bookIds: string[] | null = null;
-          if (query) {
-            const { data: books } = await (supabase as any)
-              .from('books')
-              .select('id')
-              .or(`title.ilike.%${query}%,author.ilike.%${query}%`);
-            bookIds = (books ?? []).map((b: any) => b.id);
-            // If no books match the query, return empty
-            if (bookIds && bookIds.length === 0) {
-              return { hits: [] as unknown as ListingDocument[], estimatedTotalHits: 0, processingTimeMs: 0 };
+    try {
+      const perfResult = await withTimeout(
+        measurePerf('GET /api/search', 'SEARCH', () =>
+          withMeilisearchFallback(
+            () => searchListings({ query, filters, userLocation, sortBy, limit: pageSize, offset }),
+            async () => {
+              const { createClient } = await import('@supabase/supabase-js');
+              const supabase = createClient(
+                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                process.env.SUPABASE_SERVICE_ROLE_KEY!
+              );
+
+              let bookIds: string[] | null = null;
+              if (query) {
+                const { data: books } = await (supabase as any)
+                  .from('books')
+                  .select('id')
+                  .or(`title.ilike.%${query}%,author.ilike.%${query}%`);
+                bookIds = (books ?? []).map((b: any) => b.id);
+                if (bookIds && bookIds.length === 0) {
+                  return { hits: [] as unknown as ListingDocument[], estimatedTotalHits: 0, processingTimeMs: 0 };
+                }
+              }
+
+              let q = (supabase as any)
+                .from('listings')
+                .select('*, book:books(*)', { count: 'exact' })
+                .eq('status', 'active')
+                .range(offset, offset + pageSize - 1);
+
+              if (bookIds) q = q.in('book_id', bookIds);
+              if (filters.category_id) q = q.eq('category_id', filters.category_id);
+              if (filters.condition_score_min != null) q = q.gte('condition_score', filters.condition_score_min);
+              if (filters.price_min != null) q = q.gte('final_price', filters.price_min);
+              if (filters.price_max != null) q = q.lte('final_price', filters.price_max);
+              if (filters.city) q = q.ilike('city', `%${filters.city}%`);
+              if (filters.state) q = q.ilike('state', `%${filters.state}%`);
+
+              const { data, error, count } = await q;
+              if (error) throw error;
+
+              const hits = (data ?? []).map((l: any) => ({
+                ...l,
+                title: l.book?.title ?? '',
+                author: l.book?.author ?? '',
+                subject: l.book?.subject,
+                isbn: l.book?.isbn,
+                publisher: l.book?.publisher,
+                description: l.book?.description,
+                category_id: l.book?.category_id ?? '',
+                location: { city: l.city ?? '', state: l.state ?? '', pincode: l.pincode ?? '', latitude: l.latitude, longitude: l.longitude },
+              })) as unknown as ListingDocument[];
+
+              return { hits, estimatedTotalHits: count ?? hits.length, processingTimeMs: 0 };
             }
-          }
+          )
+        ),
+        10_000,
+        'search'
+      );
 
-          let q = (supabase as any)
-            .from('listings')
-            .select('*, book:books(*)', { count: 'exact' })
-            .eq('status', 'active')
-            .range(offset, offset + pageSize - 1);
-
-          if (bookIds) q = q.in('book_id', bookIds);
-          if (filters.category_id) q = q.eq('category_id', filters.category_id);
-          if (filters.condition_score_min != null) q = q.gte('condition_score', filters.condition_score_min);
-          if (filters.price_min != null) q = q.gte('final_price', filters.price_min);
-          if (filters.price_max != null) q = q.lte('final_price', filters.price_max);
-          if (filters.city) q = q.ilike('city', `%${filters.city}%`);
-          if (filters.state) q = q.ilike('state', `%${filters.state}%`);
-
-          const { data, error, count } = await q;
-          if (error) throw error;
-
-          // Normalize to ListingDocument shape
-          const hits = (data ?? []).map((l: any) => ({
-            ...l,
-            title: l.book?.title ?? '',
-            author: l.book?.author ?? '',
-            subject: l.book?.subject,
-            isbn: l.book?.isbn,
-            publisher: l.book?.publisher,
-            description: l.book?.description,
-            category_id: l.book?.category_id ?? '',
-            location: { city: l.city ?? '', state: l.state ?? '', pincode: l.pincode ?? '', latitude: l.latitude, longitude: l.longitude },
-          })) as unknown as ListingDocument[];
-
-          return {
-            hits,
-            estimatedTotalHits: count ?? hits.length,
-            processingTimeMs: 0,
-          };
-        }
-      )
-    );
-
-    const { data: searchResult, usedFallback, fallbackReason } = result;
+      elapsedMs = perfResult.elapsedMs;
+      searchResult = perfResult.result.data;
+      usedFallback = perfResult.result.usedFallback;
+      fallbackReason = perfResult.result.fallbackReason;
+    } catch (err) {
+      // Both Meilisearch and Supabase timed out — return empty results immediately
+      console.error('[Search] Hard timeout hit, returning empty results:', err);
+      searchResult = { hits: [], estimatedTotalHits: 0, processingTimeMs: 0 };
+      usedFallback = true;
+      fallbackReason = 'Search temporarily unavailable. Please try again.';
+    }
 
     // Group by book_id + condition_score to deduplicate listings
     const groupedHits = groupListings(searchResult.hits);
