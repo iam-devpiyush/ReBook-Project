@@ -39,7 +39,7 @@ async function fetchAllListings() {
         id, seller_id, status, condition_score, final_price, original_price,
         delivery_cost, images, created_at, updated_at, book_id,
         book:books(id, isbn, title, author, publisher, subject, description, category_id),
-        seller:users(id, city, state, pincode, latitude, longitude)
+        seller:users!listings_seller_id_fkey(id, city, state, pincode, latitude, longitude)
       `)
       .eq('status', 'active')
       .range(offset, offset + PAGE - 1);
@@ -91,19 +91,23 @@ async function main() {
   const index = meili.index('listings');
 
   console.log('Deleting all existing Meilisearch documents...');
-  const deleteTask = await index.deleteAllDocuments();
-  await meili.waitForTask(deleteTask.taskUid);
+  await index.deleteAllDocuments();
+  // Give Meilisearch time to process the delete before inserting
+  await new Promise(r => setTimeout(r, 3000));
   console.log('Deleted all documents.');
 
   const docs = listings.map(buildDoc);
   const BATCH = 100;
   for (let i = 0; i < docs.length; i += BATCH) {
     const batch = docs.slice(i, i + BATCH);
-    const task = await index.addDocuments(batch);
-    await meili.waitForTask(task.taskUid);
+    await index.addDocuments(batch);
     console.log(`Indexed ${Math.min(i + BATCH, docs.length)}/${docs.length}`);
+    // Small delay between batches
+    if (i + BATCH < docs.length) await new Promise(r => setTimeout(r, 500));
   }
 
+  // Wait for indexing to complete
+  await new Promise(r => setTimeout(r, 3000));
   const stats = await index.getStats();
   console.log(`Done. Meilisearch now has ${stats.numberOfDocuments} documents.`);
 }
