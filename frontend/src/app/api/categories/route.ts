@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
         .order('name', { ascending: true }),
       4000,
       'categories'
-    ).catch(() => ({ data: [], error: new Error('Timeout') }));
+    ).catch(() => ({ data: [] as Category[], error: null }));
 
     if (error) {
       console.error('Error fetching categories:', error);
