@@ -59,19 +59,20 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServerClient();
 
-    // Wrap in explicit Promise so TypeScript knows the resolved type
-    const queryPromise = supabase
-      .from('categories')
-      .select('id, name, type, parent_id, metadata, created_at, updated_at')
-      .order('name', { ascending: true })
-      .then((res) => res)
-      .catch(() => ({ data: [] as Category[], error: null }));
+    // Run query with a 4s timeout. Supabase returns a PromiseLike (not a full Promise),
+    // so we wrap it in Promise.resolve() before racing.
+    type QueryResult = { data: Category[] | null; error: unknown };
+    const fallback: QueryResult = { data: [], error: null };
 
-    const timeoutPromise = new Promise<{ data: Category[]; error: null }>((resolve) =>
-      setTimeout(() => resolve({ data: [] as Category[], error: null }), 4000)
-    );
-
-    const { data: categories, error } = await Promise.race([queryPromise, timeoutPromise]);
+    const { data: categories, error } = await Promise.race<QueryResult>([
+      Promise.resolve(
+        supabase
+          .from('categories')
+          .select('id, name, type, parent_id, metadata, created_at, updated_at')
+          .order('name', { ascending: true })
+      ).then((res) => res as QueryResult).catch(() => fallback),
+      new Promise<QueryResult>((resolve) => setTimeout(() => resolve(fallback), 4000)),
+    ]);
 
     if (error) {
       console.error('Error fetching categories:', error);
