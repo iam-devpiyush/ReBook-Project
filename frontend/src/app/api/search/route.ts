@@ -1,4 +1,5 @@
 export const dynamic = 'force-dynamic';
+// v2 — force fresh serverless instance
 /**
  * API Route: /api/search
  *
