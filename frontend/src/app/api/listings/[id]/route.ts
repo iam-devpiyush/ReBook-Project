@@ -5,8 +5,6 @@ import { createServerClient } from '@/lib/supabase/server';
 import { requireSeller } from '@/lib/auth/middleware';
 import { updateListingSchema } from '@/lib/validation/listing';
 import type { UpdateListingRequest } from '@/types/listing';
-import { updateMeilisearchIndex, removeFromMeilisearchIndex } from '@/services/search.service';
-import { meiliUpdateListing, meiliDeleteListing, buildListingDoc } from '@/lib/meilisearch/sync';
 import { maskPhoneNumber } from '@/lib/security/sanitize';
 
 function createAdminClient() {
