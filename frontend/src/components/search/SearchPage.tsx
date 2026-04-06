@@ -55,7 +55,7 @@ interface SearchPageProps {
 export default function SearchPage({ embedded = false, limit, onListingClick }: SearchPageProps) {
   const [query, setQuery] = useState('');
   const [inputValue, setInputValue] = useState('');
-  const [filters, setFilters] = useState<SearchFilters>({ conditions: [], price_max: 2000 });
+  const [filters, setFilters] = useState<SearchFilters>({ conditions: [] });
   const [sortBy, setSortBy] = useState<SortBy>('date_desc');
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<SearchResult | null>(null);
@@ -73,7 +73,8 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
     if (f.category_id) params.set('category_id', f.category_id);
     if (f.conditions.length > 0) params.set('condition_min', String(Math.min(...f.conditions)));
     if (f.price_min !== undefined) params.set('price_min', String(f.price_min));
-    if (f.price_max !== undefined) params.set('price_max', String(f.price_max));
+    // Only send price_max if user explicitly set it below the default max
+    if (f.price_max !== undefined && f.price_max < 2000) params.set('price_max', String(f.price_max));
     params.set('sort_by', sort);
     params.set('page', String(p));
     params.set('page_size', String(limit ?? 20));
