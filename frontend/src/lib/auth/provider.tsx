@@ -121,22 +121,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
         } else {
           setSession(data.session);
           setUser(data.session?.user ?? null);
-
-          if (data.session) {
-            await checkAndRefreshSession(data.session);
-            // Start periodic refresh check only once
-            refreshTimerRef.current = setInterval(() => {
-              setSession((current) => {
-                if (current) checkAndRefreshSession(current);
-                return current;
-              });
-            }, SESSION_CONFIG.REFRESH_CHECK_INTERVAL_MS);
-          }
         }
       } catch (err) {
         setError(err as Error);
       } finally {
+        // Always unblock the UI — session refresh happens in the background
         setLoading(false);
+      }
+
+      // Proactive refresh runs AFTER UI is unblocked
+      if (session) {
+        checkAndRefreshSession(session).catch(() => {});
+        refreshTimerRef.current = setInterval(() => {
+          setSession((current) => {
+            if (current) checkAndRefreshSession(current).catch(() => {});
+            return current;
+          });
+        }, SESSION_CONFIG.REFRESH_CHECK_INTERVAL_MS);
       }
     };
 

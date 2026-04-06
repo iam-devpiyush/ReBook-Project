@@ -16,11 +16,16 @@ export default function Navbar() {
     const dropdownRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
 
-    // Fetch role from public.users table
+    // Fetch role from public.users table — cached in sessionStorage to avoid DB call on every render
     useEffect(() => {
         if (!user) { setIsAdmin(false); return; }
-        // Quick check via email as fallback
         if (user.email === 'admin@rebook.demo') { setIsAdmin(true); return; }
+
+        // Check sessionStorage cache first
+        const cacheKey = `role_${user.id}`;
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) { setIsAdmin(cached === 'admin'); return; }
+
         const supabase = createClient();
         (supabase as any)
             .from('users')
@@ -29,7 +34,9 @@ export default function Navbar() {
             .single()
             .then(({ data, error }: { data: any; error: any }) => {
                 if (error) console.warn('Navbar role fetch error:', error.message);
-                setIsAdmin(data?.role === 'admin');
+                const role = data?.role ?? 'buyer';
+                sessionStorage.setItem(cacheKey, role);
+                setIsAdmin(role === 'admin');
             });
     }, [user]);
     useEffect(() => {
@@ -113,8 +120,10 @@ export default function Navbar() {
                             )}
                         </button>
 
-                        {/* Profile */}
-                        {!loading && (
+                        {/* Profile — show skeleton while loading, never blank */}
+                        {loading ? (
+                            <div className="w-9 h-9 rounded-full bg-gray-200 animate-pulse" />
+                        ) : (
                             user ? (
                                 <div className="relative" ref={dropdownRef}>
                                     <button
