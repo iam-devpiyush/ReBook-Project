@@ -105,8 +105,8 @@ export function buildListingDoc(l: any): ListingDocument {
     status: l.status,
     condition_score: Number(l.condition_score),
     final_price: Number(l.final_price),
-    original_price: l.original_price ? Number(l.original_price) : null,
-    delivery_cost: l.delivery_cost ? Number(l.delivery_cost) : null,
+    original_price: l.original_price ? Number(l.original_price) : (null as unknown as number),
+    delivery_cost: l.delivery_cost ? Number(l.delivery_cost) : (null as unknown as number),
     images: l.images ?? [],
     location: {
       city: l.seller?.city ?? l.city ?? '',
