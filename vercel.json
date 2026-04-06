@@ -46,24 +46,6 @@
                     "value": "max-age=63072000; includeSubDomains; preload"
                 }
             ]
-        },
-        {
-            "source": "/api/impact",
-            "headers": [
-                {
-                    "key": "Cache-Control",
-                    "value": "public, s-maxage=300, stale-while-revalidate=600"
-                }
-            ]
-        },
-        {
-            "source": "/api/search",
-            "headers": [
-                {
-                    "key": "Cache-Control",
-                    "value": "public, s-maxage=60, stale-while-revalidate=120"
-                }
-            ]
         }
     ],
     "rewrites": [

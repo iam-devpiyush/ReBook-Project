@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
           .select('id, name, type, parent_id, metadata, created_at, updated_at')
           .order('name', { ascending: true })
       ).then((res) => res as QueryResult).catch(() => fallback),
-      new Promise<QueryResult>((resolve) => setTimeout(() => resolve(fallback), 4000)),
+      new Promise<QueryResult>((resolve) => setTimeout(() => resolve(fallback), 12000)),
     ]);
 
     if (error) {

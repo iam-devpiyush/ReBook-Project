@@ -42,10 +42,15 @@ export default function SellerDashboard({ userId, onNavigate: _onNavigate }: Sel
         setLoading(true);
         setError(null);
         try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 15000);
+
             const [listingsRes, ordersRes] = await Promise.all([
-                fetch('/api/listings/seller/me?pageSize=100'),
-                fetch('/api/orders?pageSize=100'),
+                fetch('/api/listings/seller/me?pageSize=100', { signal: controller.signal }),
+                fetch('/api/orders?pageSize=100', { signal: controller.signal }),
             ]);
+            clearTimeout(timer);
+
             const listingsJson = await listingsRes.json();
             const ordersJson = await ordersRes.json();
 

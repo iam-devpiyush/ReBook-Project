@@ -27,13 +27,13 @@ export async function GET() {
   try {
     const supabase = getSupabase() as any;
 
-    // Query 1: platform_stats — 3s timeout, fallback to null
+    // Query 1: platform_stats — 12s timeout, fallback to null
     const statsResult = await queryWithTimeout<{ data: any[] | null; error: any }>(
       supabase
         .from('platform_stats')
         .select('trees_saved, water_saved_liters, co2_reduced_kg, total_books_sold')
         .limit(10),
-      3000,
+      12000,
       { data: null, error: null }
     );
 
@@ -58,13 +58,13 @@ export async function GET() {
         total_books_sold += Number(row.total_books_sold ?? 0);
       }
     } else {
-      // Query 2: count orders — 3s timeout, fallback to 0
+      // Query 2: count orders — 12s timeout, fallback to 0
       const countResult = await queryWithTimeout<{ count: number | null; error: any }>(
         supabase
           .from('orders')
           .select('id', { count: 'exact', head: true })
           .neq('status', 'cancelled'),
-        3000,
+        12000,
         { count: 0, error: null }
       );
 

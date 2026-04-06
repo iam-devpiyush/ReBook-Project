@@ -298,6 +298,7 @@ export async function GET(request: NextRequest) {
     appCache.set(cacheKey, responseData, TTL.SEARCH);
 
     const response = NextResponse.json(responseData);
+    response.headers.set('Cache-Control', 'no-store');
     addTimingHeader(response.headers, elapsedMs, 'SEARCH');
     return response;
   } catch (error) {
