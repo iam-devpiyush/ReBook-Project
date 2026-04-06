@@ -278,6 +278,7 @@ export async function GET(request: NextRequest) {
       usedFallback = perfResult.result.usedFallback;
       fallbackReason = perfResult.result.fallbackReason;
       console.log(`[search] usedFallback=${usedFallback} firstTitle="${searchResult.hits[0]?.title}" totalHits=${searchResult.estimatedTotalHits}`);
+      console.log(`[search] meiliHost=${process.env.MEILISEARCH_HOST} hasAdminKey=${!!process.env.MEILISEARCH_ADMIN_API_KEY} hasApiKey=${!!process.env.MEILISEARCH_API_KEY}`);
     } catch (err) {
       // Both Meilisearch and Supabase timed out — return empty results immediately
       console.error('[Search] Hard timeout hit, returning empty results:', err);
@@ -300,7 +301,7 @@ export async function GET(request: NextRequest) {
       },
       processing_time_ms: elapsedMs,
       cached: false,
-      _debug: { usedFallback, firstTitle: groupedHits[0]?.title ?? null, totalFromSource: searchResult.estimatedTotalHits },
+      _debug: { usedFallback, firstTitle: groupedHits[0]?.title ?? null, totalFromSource: searchResult.estimatedTotalHits, meiliHost: process.env.MEILISEARCH_HOST, hasAdminKey: !!process.env.MEILISEARCH_ADMIN_API_KEY, hasApiKey: !!process.env.MEILISEARCH_API_KEY },
       ...(usedFallback && { fallback: true, fallback_reason: fallbackReason }),
     };
 
