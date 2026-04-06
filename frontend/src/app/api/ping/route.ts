@@ -56,27 +56,25 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Variant 3: full auth middleware ─────────────────────────────────────
-  if (searchParams.has('auth')) {
-    try {
-      const { requireAuth } = await import('@/lib/auth/middleware');
-      const authStart = Date.now();
-      const result = await requireAuth(request);
-      const authLatency = Date.now() - authStart;
+  try {
+    const { requireAuth } = await import('@/lib/auth/middleware');
+    const authStart = Date.now();
+    const result = await requireAuth(request);
+    const authLatency = Date.now() - authStart;
 
-      return NextResponse.json({
-        variant: 'auth',
-        message: 'Full requireAuth flow',
-        authenticated: result.success,
-        auth_latency_ms: authLatency,
-        total_latency_ms: Date.now() - start,
-        ts: Date.now(),
-      });
-    } catch (err: any) {
-      return NextResponse.json({
-        variant: 'auth',
-        error: err?.message ?? 'Auth error',
-        total_latency_ms: Date.now() - start,
-      }, { status: 500 });
-    }
+    return NextResponse.json({
+      variant: 'auth',
+      message: 'Full requireAuth flow',
+      authenticated: result.success,
+      auth_latency_ms: authLatency,
+      total_latency_ms: Date.now() - start,
+      ts: Date.now(),
+    });
+  } catch (err: any) {
+    return NextResponse.json({
+      variant: 'auth',
+      error: err?.message ?? 'Auth error',
+      total_latency_ms: Date.now() - start,
+    }, { status: 500 });
   }
 }
