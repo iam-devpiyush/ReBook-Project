@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import SearchPage from '@/components/search/SearchPage';
 import type { ListingDocument } from '@/services/search.service';
+
+// Lazy-load SearchPage — it fetches data and is heavy. Hero renders instantly without it.
+const SearchPage = lazy(() => import('@/components/search/SearchPage'));
 
 interface EcoStats {
   trees_saved: number;
@@ -153,11 +155,26 @@ export default function Home() {
       {/* ── Browse Books ── */}
       <section className="py-16 bg-gray-50">
         <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
-          <SearchPage
-            embedded
-            limit={8}
-            onListingClick={(listing: ListingDocument) => router.push(`/listings/${listing.id}`)}
-          />
+          <Suspense fallback={
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="bg-white rounded-xl border border-gray-200 overflow-hidden animate-pulse">
+                  <div className="aspect-[3/4] bg-gray-200" />
+                  <div className="p-3 space-y-2">
+                    <div className="h-4 bg-gray-200 rounded w-3/4" />
+                    <div className="h-3 bg-gray-200 rounded w-1/2" />
+                    <div className="h-5 bg-gray-200 rounded w-1/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          }>
+            <SearchPage
+              embedded
+              limit={8}
+              onListingClick={(listing: ListingDocument) => router.push(`/listings/${listing.id}`)}
+            />
+          </Suspense>
         </div>
       </section>
 

@@ -82,8 +82,10 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
 
   const doSearch = useCallback(async (q: string, f: SearchFilters, sort: SortBy, p: number) => {
     setLoading(true);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000); // 8s max
     try {
-      const res = await fetch(buildUrl(q, f, sort, p));
+      const res = await fetch(buildUrl(q, f, sort, p), { signal: controller.signal });
       if (!res.ok) {
         setResult({ data: [], pagination: { page: p, page_size: limit ?? 20, total_hits: 0, total_pages: 0 }, processing_time_ms: 0 });
         return;
@@ -92,6 +94,7 @@ export default function SearchPage({ embedded = false, limit, onListingClick }: 
     } catch {
       setResult({ data: [], pagination: { page: p, page_size: limit ?? 20, total_hits: 0, total_pages: 0 }, processing_time_ms: 0 });
     } finally {
+      clearTimeout(timer);
       setLoading(false);
     }
   }, [buildUrl, limit]);

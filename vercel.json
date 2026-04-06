@@ -11,12 +11,18 @@
     "crons": [
         {
             "path": "/api/health",
-            "schedule": "0 0 * * *"
+            "schedule": "*/5 * * * *"
         }
     ],
     "functions": {
         "app/api/ai/scan/route.ts": {
             "maxDuration": 60
+        },
+        "app/api/ai/upload-images/route.ts": {
+            "maxDuration": 30
+        },
+        "app/api/listings/route.ts": {
+            "maxDuration": 15
         }
     },
     "headers": [
@@ -38,6 +44,24 @@
                 {
                     "key": "Strict-Transport-Security",
                     "value": "max-age=63072000; includeSubDomains; preload"
+                }
+            ]
+        },
+        {
+            "source": "/api/impact",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, s-maxage=300, stale-while-revalidate=600"
+                }
+            ]
+        },
+        {
+            "source": "/api/search",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, s-maxage=60, stale-while-revalidate=120"
                 }
             ]
         }

@@ -1,4 +1,5 @@
-export const dynamic = 'force-dynamic';
+// Cache impact stats for 5 minutes — data changes rarely and this is hit on every homepage load
+export const revalidate = 300; // 5 minutes ISR — rebuilt at most every 5 min
 /**
  * GET /api/impact
  * Returns platform-wide cumulative environmental impact metrics.
@@ -9,16 +10,25 @@ export const dynamic = 'force-dynamic';
  *    using the same formula from Task 10: trees = n/30, water = n*50, co2 = n*2.5
  */
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
+
+// Use service-role client — no cookies needed, this is a public read-only endpoint
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 export async function GET() {
     try {
-        const supabase = createServerClient();
+        const supabase = getSupabase() as any;
 
         // Try platform_stats first (populated by DB triggers)
-        const { data: stats } = await (supabase as any)
+        const { data: stats } = await supabase
             .from('platform_stats')
-            .select('trees_saved, water_saved_liters, co2_reduced_kg, total_books_sold');
+            .select('trees_saved, water_saved_liters, co2_reduced_kg, total_books_sold')
+            .limit(10);
 
         let trees_saved = 0;
         let water_saved_liters = 0;
