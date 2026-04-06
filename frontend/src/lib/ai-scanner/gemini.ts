@@ -50,11 +50,10 @@ function imageToGenerativePart(base64Data: string, mimeType: string) {
 }
 
 /** Convert a data-URL or https URL to a base64 inline part for Gemini */
-async function urlToPart(imageUrl: string) {
+async function urlToPart(imageUrl: string, maxSize = 800) {
   if (imageUrl.startsWith('data:')) {
     const mimeType = (imageUrl.match(/data:([^;]+);/) || [])[1] || 'image/jpeg';
-    // Resize large images to max 800px to avoid payload size issues
-    const resized = await resizeDataUrl(imageUrl, 800);
+    const resized = await resizeDataUrl(imageUrl, maxSize);
     const resizedBase64 = resized.split(',')[1];
     return imageToGenerativePart(resizedBase64, mimeType);
   }
@@ -176,7 +175,7 @@ export async function validateBookImage(
 // ─── book data extraction ─────────────────────────────────────────────────────
 
 const EXTRACTION_PROMPT = `
-You are a book data extraction assistant. Look carefully at these book cover images and extract all available information.
+You are a book data extraction assistant. Look carefully at BOTH book cover images and extract all available information.
 
 Return ONLY a JSON object with these fields (use null for anything not visible):
 {
@@ -191,14 +190,18 @@ Return ONLY a JSON object with these fields (use null for anything not visible):
   "price_source": "cover_price" or null
 }
 
-CRITICAL RULES for original_price_inr:
-- ONLY extract the price if you can LITERALLY SEE it printed on the book in the image
-- Look for ₹ symbol followed by numbers on the back cover
-- Look for text like "MRP", "Price:", "Rs." near a number
-- Indian edition books have MRP printed near the ISBN barcode on the back cover
-- If you cannot see a price printed in the image, set original_price_inr to null
-- DO NOT guess or recall the price from memory — only extract what is visually present
-- The price you extract must be exactly what is printed, not an approximation
+RULES for original_price_inr — look VERY carefully at the back cover image:
+- Scan the ENTIRE back cover image for any price information
+- Look for ₹ symbol followed by numbers (e.g. ₹499, ₹ 499, ₹499.00)
+- Look for "MRP", "MRP:", "MRP ₹", "Rs.", "Rs", "Price:", "Price ₹" near a number
+- Look near the ISBN barcode area — Indian books always print MRP near the barcode
+- Look at the bottom of the back cover — price stickers or printed prices are common there
+- Look for text like "Printed in India" followed by a price
+- The price may be small text — look carefully at all text on the back cover
+- If you find a price, extract just the integer value (e.g. ₹499.00 → 499)
+- If multiple prices are visible, use the one labeled MRP or the highest one
+- Only set to null if you genuinely cannot find any price after careful inspection
+- Set price_source to "cover_price" whenever you find a price
 `;
 
 export async function extractBookDataFromImages(
@@ -212,9 +215,10 @@ export async function extractBookDataFromImages(
   };
 
   try {
+    // Use higher resolution for back cover — price text is often small and needs detail
     const [frontPart, backPart] = await Promise.all([
-      urlToPart(frontCoverUrl),
-      urlToPart(backCoverUrl),
+      urlToPart(frontCoverUrl, 1200),
+      urlToPart(backCoverUrl, 1600),
     ]);
 
     const text = await withModelFallback(async (modelName) => {
