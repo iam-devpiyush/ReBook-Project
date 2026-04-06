@@ -15,7 +15,7 @@
         }
     ],
     "functions": {
-        "src/app/api/ai/scan/route.ts": {
+        "app/api/ai/scan/route.ts": {
             "maxDuration": 60
         }
     },

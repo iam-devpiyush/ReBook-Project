@@ -201,7 +201,11 @@ describe('Auth Configuration Tests', () => {
           supabase.auth.signInWithOAuth({
             provider,
             options: {
-              redirectTo: `${process.env.SUPABASE_URL}/auth/v1/callback`
+              redirectTo: `${process.env.SUPABASE_URL}/auth/v1/callback`,
+              queryParams: {
+      access_type: 'offline',
+      prompt: 'consent',
+    }
             }
           });
         }).not.toThrow();
