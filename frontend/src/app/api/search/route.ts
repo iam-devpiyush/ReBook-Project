@@ -18,7 +18,8 @@ import { withTimeout } from '@/lib/timeout';
 
 const meiliClient = new MeiliSearch({
   host: process.env.MEILISEARCH_HOST || 'http://localhost:7700',
-  apiKey: process.env.MEILISEARCH_API_KEY || '',
+  // Use search key if available, fall back to admin key — both work for reads
+  apiKey: process.env.MEILISEARCH_API_KEY || process.env.MEILISEARCH_ADMIN_API_KEY || '',
 });
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
