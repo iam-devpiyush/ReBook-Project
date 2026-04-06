@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
-// cache-bust: 2
+export const maxDuration = 25;
+// cache-bust: 3 — force new bundle
 /**
  * API Route: /api/search
  *
