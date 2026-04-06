@@ -175,7 +175,7 @@ export default function SellerDashboard({ userId, onNavigate: _onNavigate }: Sel
                 ) : (
                     <ul className="divide-y divide-gray-100">
                         {filtered.map(listing => {
-                            const book = listing.books ?? null;
+                            const book = (listing as any).book ?? (listing as any).books ?? null;
                             const badge = STATUS_BADGE[listing.status] ?? 'bg-gray-100 text-gray-600';
                             const payout = Math.round(listing.final_price * 0.875);
 
