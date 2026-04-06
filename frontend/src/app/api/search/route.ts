@@ -234,7 +234,6 @@ export async function GET(request: NextRequest) {
                 .from('listings')
                 .select('*, book:books(*)', { count: 'exact' })
                 .eq('status', 'active')
-                .order('created_at', { ascending: false })
                 .range(offset, offset + pageSize - 1);
 
               if (bookIds) q = q.in('book_id', bookIds);
@@ -244,6 +243,9 @@ export async function GET(request: NextRequest) {
               if (filters.price_max != null) q = q.lte('final_price', filters.price_max);
               if (filters.city) q = q.ilike('city', `%${filters.city}%`);
               if (filters.state) q = q.ilike('state', `%${filters.state}%`);
+
+              // Order must come after all filters
+              q = q.order('created_at', { ascending: false });
 
               const { data, error, count } = await q;
               if (error) throw error;
