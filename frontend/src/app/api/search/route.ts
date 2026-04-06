@@ -1,5 +1,5 @@
 export const dynamic = 'force-dynamic';
-// v2 — force fresh serverless instance
+// cache-bust: 2
 /**
  * API Route: /api/search
  *
@@ -234,6 +234,7 @@ export async function GET(request: NextRequest) {
                 .from('listings')
                 .select('*, book:books(*)', { count: 'exact' })
                 .eq('status', 'active')
+                .order('created_at', { ascending: false })
                 .range(offset, offset + pageSize - 1);
 
               if (bookIds) q = q.in('book_id', bookIds);
