@@ -10,7 +10,6 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { appCache, TTL } from '@/lib/cache';
-import { withTimeout } from '@/lib/timeout';
 
 export interface Category {
   id: string;
@@ -60,14 +59,19 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServerClient();
 
-    const { data: categories, error } = await withTimeout(
-      supabase
-        .from('categories')
-        .select('id, name, type, parent_id, metadata, created_at, updated_at')
-        .order('name', { ascending: true }),
-      4000,
-      'categories'
-    ).catch(() => ({ data: [] as Category[], error: null }));
+    // Wrap in explicit Promise so TypeScript knows the resolved type
+    const queryPromise = supabase
+      .from('categories')
+      .select('id, name, type, parent_id, metadata, created_at, updated_at')
+      .order('name', { ascending: true })
+      .then((res) => res)
+      .catch(() => ({ data: [] as Category[], error: null }));
+
+    const timeoutPromise = new Promise<{ data: Category[]; error: null }>((resolve) =>
+      setTimeout(() => resolve({ data: [] as Category[], error: null }), 4000)
+    );
+
+    const { data: categories, error } = await Promise.race([queryPromise, timeoutPromise]);
 
     if (error) {
       console.error('Error fetching categories:', error);
