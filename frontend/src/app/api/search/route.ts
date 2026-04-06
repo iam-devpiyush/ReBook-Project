@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 export const maxDuration = 25;
-// cache-bust: 3 — force new bundle
+// cache-bust: 4
 /**
  * API Route: /api/search
  *
@@ -13,16 +13,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { MeiliSearch } from 'meilisearch';
 import type { SearchFilters, SortBy, ListingDocument } from '@/services/search.service';
 import { applyRateLimit, getClientIp, SEARCH_RATE_LIMIT } from '@/lib/rate-limit';
-import { withMeilisearchFallback } from '@/lib/errors/graceful-degradation';
 import { appCache, TTL, buildCacheKey } from '@/lib/cache';
 import { measurePerf, addTimingHeader } from '@/lib/monitoring/performance';
 import { withTimeout } from '@/lib/timeout';
+import { withMeilisearchFallback } from '@/lib/errors/graceful-degradation';
 
-const meiliClient = new MeiliSearch({
-  host: process.env.MEILISEARCH_HOST || 'http://localhost:7700',
-  // Prefer admin key (works for both read and write), fall back to search-only key
-  apiKey: process.env.MEILISEARCH_ADMIN_API_KEY || process.env.MEILISEARCH_API_KEY || '',
-});
+// Create client per-request — never cache at module level
+function getMeiliClient() {
+  return new MeiliSearch({
+    host: process.env.MEILISEARCH_HOST || 'http://localhost:7700',
+    apiKey: process.env.MEILISEARCH_ADMIN_API_KEY || process.env.MEILISEARCH_API_KEY || '',
+  });
+}
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -55,7 +57,7 @@ async function searchListings(options: {
   limit?: number;
   offset?: number;
 }) {
-  const index = meiliClient.index('listings');
+  const index = getMeiliClient().index('listings');
   const filterParts: string[] = ['status = "active"'];
   const f = options.filters ?? {};
   if (f.category_id) filterParts.push(`category_id = "${f.category_id}"`);
