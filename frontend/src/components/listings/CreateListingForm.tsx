@@ -76,6 +76,11 @@ export default function CreateListingForm() {
     setUploadProgress(null);
     setStep(2);
 
+    // Abort controller — cancel both requests if the component unmounts or user navigates away
+    const controller = new AbortController();
+    const UPLOAD_TIMEOUT_MS = 30_000;  // 30s for image upload
+    const SCAN_TIMEOUT_MS  = 90_000;  // 90s for AI scan (Gemini can be slow)
+
     try {
       const scanId = crypto.randomUUID();
       setScanId(scanId);
@@ -83,11 +88,18 @@ export default function CreateListingForm() {
       // ── Phase 1: upload images to Supabase Storage ──────────────────────
       setUploadProgress({ done: 0, total: 4 });
 
-      const uploadRes = await fetch('/api/ai/upload-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scan_id: scanId, images }),
-      });
+      const uploadTimer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+      let uploadRes: Response;
+      try {
+        uploadRes = await fetch('/api/ai/upload-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scan_id: scanId, images }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(uploadTimer);
+      }
       const uploadJson = await uploadRes.json();
       if (!uploadRes.ok) throw new Error(uploadJson.error || 'Image upload failed');
 
@@ -97,11 +109,18 @@ export default function CreateListingForm() {
       // ── Phase 2: run AI scan with public URLs ────────────────────────────
       setUploadProgress(null);
 
-      const res = await fetch('/api/ai/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images: publicUrls, scan_id: scanId }),
-      });
+      const scanTimer = setTimeout(() => controller.abort(), SCAN_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch('/api/ai/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ images: publicUrls, scan_id: scanId }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(scanTimer);
+      }
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Scan failed');
 
@@ -114,7 +133,11 @@ export default function CreateListingForm() {
         official_cover_image: json.result.official_cover_image ?? json.result.book_metadata?.cover_image ?? null,
       });
     } catch (err: any) {
-      setScanError(err.message || 'Scan failed. Please try again.');
+      if (err.name === 'AbortError') {
+        setScanError('Request timed out. Please check your connection and try again.');
+      } else {
+        setScanError(err.message || 'Scan failed. Please try again.');
+      }
     } finally {
       setScanning(false);
       setUploadProgress(null);
@@ -143,6 +166,8 @@ export default function CreateListingForm() {
     }
     setCalculatingPrice(true);
     setFormError(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
     try {
       const location = { city: manual.city, state: manual.state, pincode: manual.pincode };
       const res = await fetch('/api/pricing/calculate', {
@@ -155,14 +180,20 @@ export default function CreateListingForm() {
           buyer_location: location,
           weight: 0.5,
         }),
+        signal: controller.signal,
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Pricing failed');
       setPricingBreakdown(json.data);
       setStep(4);
     } catch (err: any) {
-      setFormError(err.message || 'Failed to calculate pricing.');
+      if (err.name === 'AbortError') {
+        setFormError('Request timed out. Please try again.');
+      } else {
+        setFormError(err.message || 'Failed to calculate pricing.');
+      }
     } finally {
+      clearTimeout(timer);
       setCalculatingPrice(false);
     }
   };
@@ -175,8 +206,6 @@ export default function CreateListingForm() {
     setFormError(null);
 
     const meta = scanResult.book_metadata;
-    // Official cover image goes first — used as catalogue thumbnail
-    // User's actual photos follow for condition verification
     const officialCover = scanResult.official_cover_image;
     const userPhotos = [
       uploadedImages.front_cover,
@@ -220,18 +249,27 @@ export default function CreateListingForm() {
       scan_id: scanId ?? undefined,
     };
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20_000);
     try {
       const res = await fetch('/api/listings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to create listing');
       router.push('/seller');
     } catch (err: any) {
-      setFormError(err.message || 'Failed to create listing.');
+      if (err.name === 'AbortError') {
+        setFormError('Request timed out. Please try again.');
+      } else {
+        setFormError(err.message || 'Failed to create listing.');
+      }
       setSubmitting(false);
+    } finally {
+      clearTimeout(timer);
     }
   };
 
@@ -311,10 +349,28 @@ export default function CreateListingForm() {
               <div className="text-5xl mb-4">❌</div>
               <h2 className="text-xl font-bold text-gray-900 mb-2">Scan failed</h2>
               <p className="text-sm text-red-600 mb-6">{scanError}</p>
-              <button onClick={() => setStep(1)}
-                className="px-6 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700">
-                Try Again
-              </button>
+              {/* Show previews of already-uploaded images */}
+              {uploadedImages && (
+                <div className="flex justify-center gap-2 mb-6">
+                  {(['front_cover','back_cover','spine','pages'] as const).map(k => (
+                    <img key={k} src={uploadedImages[k]} alt={k}
+                      className="w-14 h-14 object-cover rounded-lg border-2 border-gray-200" />
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-3 justify-center">
+                {uploadedImages && (
+                  <button
+                    onClick={() => handleImagesComplete(uploadedImages)}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700">
+                    Rescan (same images)
+                  </button>
+                )}
+                <button onClick={() => setStep(1)}
+                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-50">
+                  Upload new images
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -403,7 +459,7 @@ export default function CreateListingForm() {
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 text-sm text-amber-800">
               <p className="font-semibold mb-1">⚠️ Original price not found</p>
               <p>The AI could not detect the MRP from the images or online databases. Please rescan with a clearer photo of the back cover showing the price barcode, or the price sticker.</p>
-              <button onClick={() => setStep(1)}
+              <button onClick={() => handleImagesComplete(uploadedImages!)}
                 className="mt-3 px-4 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg hover:bg-amber-700">
                 Rescan Book
               </button>

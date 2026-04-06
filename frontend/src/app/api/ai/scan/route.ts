@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // seconds — Gemini + metadata fetch can take 20-40s
+// Vercel Pro/Team: 60s. Hobby: 10s. Set to 60 and ensure all external calls have their own timeouts.
+export const maxDuration = 60;
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { requireAuth } from '@/lib/auth/middleware';
@@ -130,23 +131,30 @@ export async function POST(request: NextRequest) {
           `intitle:"${geminiData.title}"`,
         ];
         for (const q of queries) {
-          const res = await fetch(
-            `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&country=IN&maxResults=20`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            for (const item of data.items ?? []) {
-              const si = item.saleInfo;
-              const entry = si?.retailPrice ?? si?.listPrice;
-              if (entry?.amount > 0) {
-                const p = entry.currencyCode === 'INR'
-                  ? Math.round(entry.amount)
-                  : entry.currencyCode === 'USD'
-                  ? Math.round(entry.amount * 84)
-                  : null;
-                if (p && p >= 50 && p <= 15000) titlePrices.push(p);
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 5000);
+          try {
+            const res = await fetch(
+              `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&country=IN&maxResults=20`,
+              { signal: ctrl.signal }
+            );
+            if (res.ok) {
+              const data = await res.json();
+              for (const item of data.items ?? []) {
+                const si = item.saleInfo;
+                const entry = si?.retailPrice ?? si?.listPrice;
+                if (entry?.amount > 0) {
+                  const p = entry.currencyCode === 'INR'
+                    ? Math.round(entry.amount)
+                    : entry.currencyCode === 'USD'
+                    ? Math.round(entry.amount * 84)
+                    : null;
+                  if (p && p >= 50 && p <= 15000) titlePrices.push(p);
+                }
               }
             }
+          } catch { /* ignore timeout/network errors */ } finally {
+            clearTimeout(t);
           }
         }
       } catch { /* ignore */ }

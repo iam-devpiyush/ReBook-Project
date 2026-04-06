@@ -121,8 +121,11 @@ export default function BookImageUploader({ onComplete, onCancel }: Props) {
     setPreview(dataUrl);
     e.target.value = '';
 
-    // Resize to max 800px before sending to Gemini (avoids rate limit / payload issues)
-    const resizedUrl = await resizeImageForValidation(dataUrl, 800);
+    // Resize to max 1200px before storing — keeps file size small enough to send
+    // as base64 JSON (4 images × ~200KB ≈ well under the 10 MB body limit) while
+    // retaining enough detail for Gemini to read ISBN barcodes and cover text.
+    const resizedUrl = await resizeImageForValidation(dataUrl, 1200);
+    setPreview(resizedUrl);
 
     // Auto-validate with Gemini Vision — checks image matches the expected step
     setValidation('validating');
@@ -134,12 +137,16 @@ export default function BookImageUploader({ onComplete, onCancel }: Props) {
       });
       const json = await res.json();
 
-      if (json.valid) {
+      // Treat auth errors or unexpected responses as unavailable — don't block user
+      if (!res.ok || json.error) {
+        setValidation('valid');
+        setValidationReason('Image accepted');
+        setApiUnavailable(false);
+      } else if (json.valid) {
         setValidation('valid');
         setValidationReason(json.reason || 'Image looks good');
         setApiUnavailable(false);
       } else if (json.api_unavailable) {
-        // Gemini unavailable — allow the image through so users aren't blocked
         setValidation('valid');
         setValidationReason('Image accepted (AI validation unavailable)');
         setApiUnavailable(true);

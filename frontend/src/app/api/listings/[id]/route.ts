@@ -6,6 +6,7 @@ import { requireSeller } from '@/lib/auth/middleware';
 import { updateListingSchema } from '@/lib/validation/listing';
 import type { UpdateListingRequest } from '@/types/listing';
 import { updateMeilisearchIndex, removeFromMeilisearchIndex } from '@/services/search.service';
+import { meiliUpdateListing, meiliDeleteListing, buildListingDoc } from '@/lib/meilisearch/sync';
 import { maskPhoneNumber } from '@/lib/security/sanitize';
 
 function createAdminClient() {
@@ -104,18 +105,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Failed to update listing' }, { status: 500 });
     }
 
-    updateMeilisearchIndex({
-      id: updatedListing.id, book_id: updatedListing.book_id, seller_id: updatedListing.seller_id,
-      title: updatedListing.book?.title ?? '', author: updatedListing.book?.author ?? '',
-      subject: updatedListing.book?.subject, isbn: updatedListing.book?.isbn,
-      publisher: updatedListing.book?.publisher, description: updatedListing.book?.description,
-      status: updatedListing.status, category_id: updatedListing.book?.category_id ?? '',
-      condition_score: updatedListing.condition_score, final_price: updatedListing.final_price,
-      original_price: updatedListing.original_price, delivery_cost: updatedListing.delivery_cost,
-      images: updatedListing.images ?? [],
-      location: { city: updatedListing.city ?? '', state: updatedListing.state ?? '', pincode: updatedListing.pincode ?? '' },
-      created_at: updatedListing.created_at, updated_at: updatedListing.updated_at,
-    }).catch((err: unknown) => console.error('Meilisearch sync failed:', err));
+    meiliUpdateListing(buildListingDoc(updatedListing)).catch((err: unknown) => console.error('Meilisearch sync failed:', err));
 
     return NextResponse.json({ success: true, data: updatedListing });
   } catch (error) {
@@ -158,7 +148,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Failed to delete listing' }, { status: 500 });
     }
 
-    removeFromMeilisearchIndex(id).catch((err: unknown) => console.error('Meilisearch remove failed:', err));
+    meiliDeleteListing(id).catch((err: unknown) => console.error('Meilisearch remove failed:', err));
 
     return NextResponse.json({ success: true, message: 'Listing deleted successfully' });
   } catch (error) {

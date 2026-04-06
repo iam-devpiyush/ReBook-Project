@@ -113,19 +113,25 @@ export interface GeminiBookData {
 
 const IMAGE_TYPE_PROMPTS: Record<string, string> = {
   front_cover:
-    'Is this image a clear photo of the FRONT COVER of a physical book? ' +
-    'It should show the book title and/or author on the cover. ' +
-    'Reply with JSON: {"valid": true/false, "reason": "short reason"}',
+    'Does this image show the FRONT COVER of a physical book? ' +
+    'The front cover must be visible with the title, author name, and cover art clearly shown. ' +
+    'Return {"valid": true, "reason": "short reason"} ONLY if the image shows the front cover of a book. ' +
+    'Return {"valid": false, "reason": "short reason"} if the image shows the back cover, spine, inside pages, or is not a book at all.',
   back_cover:
-    'Is this image a clear photo of the BACK COVER of a physical book? ' +
-    'It may show a synopsis, barcode, or ISBN. ' +
-    'Reply with JSON: {"valid": true/false, "reason": "short reason"}',
+    'Does this image show the BACK COVER of a physical book? ' +
+    'The back cover must be visible with back-cover text, barcode, or publisher info clearly shown. ' +
+    'Return {"valid": true, "reason": "short reason"} ONLY if the image shows the back cover of a book. ' +
+    'Return {"valid": false, "reason": "short reason"} if the image shows the front cover, spine, inside pages, or is not a book at all.',
   spine:
-    'Is this image a clear photo of the SPINE of a physical book (the narrow side)? ' +
-    'Reply with JSON: {"valid": true/false, "reason": "short reason"}',
+    'Does this image show the SPINE of a physical book? ' +
+    'The spine must be visible — the narrow side of the book with the title and/or author text running along it. ' +
+    'Return {"valid": true, "reason": "short reason"} ONLY if the image shows the spine of a book. ' +
+    'Return {"valid": false, "reason": "short reason"} if the image shows the front cover, back cover, inside pages, or is not a book at all.',
   pages:
-    'Is this image a clear photo of the INSIDE PAGES of a physical book (open pages showing text)? ' +
-    'Reply with JSON: {"valid": true/false, "reason": "short reason"}',
+    'Does this image show the INSIDE PAGES of a physical book? ' +
+    'The inside pages must be visible — an open book with printed text or illustrations on the pages. ' +
+    'Return {"valid": true, "reason": "short reason"} ONLY if the image shows the inside pages of a book. ' +
+    'Return {"valid": false, "reason": "short reason"} if the image shows the cover, spine, or is not a book at all.',
 };
 
 export async function validateBookImage(

@@ -22,23 +22,26 @@ export function useAuth() {
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
+    // Use the singleton client — do NOT call createClient() inside the effect
+    // to avoid creating multiple GoTrue instances on re-renders.
     const supabase = createClient();
+    let mounted = true;
 
     // Get initial session
     const getSession = async () => {
       try {
         const { data, error: sessionError } = await supabase.auth.getSession();
-        
+        if (!mounted) return;
         if (sessionError) {
           setError(sessionError);
           setLoading(false);
           return;
         }
-        
         setSession(data.session);
         setUser(data.session?.user ?? null);
         setLoading(false);
       } catch (err) {
+        if (!mounted) return;
         setError(err as Error);
         setLoading(false);
       }
@@ -51,11 +54,11 @@ export function useAuth() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
       (event: AuthChangeEvent, newSession: Session | null) => {
+        if (!mounted) return;
         setSession(newSession);
         setUser(newSession?.user ?? null);
         setLoading(false);
-        
-        // Handle specific auth events
+
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setSession(null);
@@ -64,6 +67,7 @@ export function useAuth() {
     );
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);

@@ -1,7 +1,12 @@
 /** @type {import('next').NextConfig} */
 
 // Allowed origins for CORS (Requirement 23.2)
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',');
+// In production NEXT_PUBLIC_APP_URL must be set — fall back to localhost only for local dev
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : process.env.NEXT_PUBLIC_APP_URL
+  ? [process.env.NEXT_PUBLIC_APP_URL]
+  : ['http://localhost:3000'];
 
 /**
  * Security headers applied to every response (Requirements 17.1-17.9, 23.2)

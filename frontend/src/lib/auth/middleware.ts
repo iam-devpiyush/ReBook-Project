@@ -22,6 +22,11 @@ function createAdminClient() {
   );
 }
 
+// ── In-memory profile cache (per serverless instance) ────────────────────────
+// Avoids a DB round-trip on every API call for the same user within a 60s window.
+const profileCache = new Map<string, { profile: { role: string; is_active: boolean; suspended_until: string | null }; expiresAt: number }>();
+const PROFILE_CACHE_TTL_MS = 60_000; // 60 seconds
+
 /**
  * User with role information from database
  */
@@ -64,35 +69,47 @@ export async function getUser(_request: NextRequest): Promise<MiddlewareResult> 
   // Fetch user profile from database to get role and status
   // Use service-role client to bypass RLS
   const adminClient = createAdminClient();
-  let { data: profile, error: profileError } = await adminClient
-    .from('users')
-    .select('role, is_active, suspended_until')
-    .eq('id', user.id)
-    .single();
 
-  // If profile doesn't exist yet (new OAuth user), create it with default role
-  if (profileError || !profile) {
-    const { data: newProfile, error: insertError } = await adminClient
+  // Check cache first to avoid a DB round-trip on every request
+  const cached = profileCache.get(user.id);
+  let profile: { role: 'buyer' | 'seller' | 'admin'; is_active: boolean; suspended_until: string | null } | null = null;
+
+  if (cached && cached.expiresAt > Date.now()) {
+    profile = cached.profile as typeof profile;
+  } else {
+    let { data: fetchedProfile, error: profileError } = await adminClient
       .from('users')
-      .upsert({
-        id: user.id,
-        email: user.email,
-        name: user.user_metadata?.full_name || user.user_metadata?.name || user.email,
-        oauth_provider: user.app_metadata?.provider || 'google',
-        oauth_provider_id: user.user_metadata?.sub || user.id,
-        role: 'buyer',
-        is_active: true,
-        suspended_until: null,
-      }, { onConflict: 'id' })
       .select('role, is_active, suspended_until')
+      .eq('id', user.id)
       .single();
 
-    if (insertError || !newProfile) {
-      // Still can't get profile — allow access with safe defaults
-      profile = { role: 'buyer', is_active: true, suspended_until: null } as typeof profile;
-    } else {
-      profile = newProfile;
+    // If profile doesn't exist yet (new OAuth user), create it with default role
+    if (profileError || !fetchedProfile) {
+      const { data: newProfile, error: insertError } = await adminClient
+        .from('users')
+        .upsert({
+          id: user.id,
+          email: user.email,
+          name: user.user_metadata?.full_name || user.user_metadata?.name || user.email,
+          oauth_provider: user.app_metadata?.provider || 'google',
+          oauth_provider_id: user.user_metadata?.sub || user.id,
+          role: 'buyer',
+          is_active: true,
+          suspended_until: null,
+        }, { onConflict: 'id' })
+        .select('role, is_active, suspended_until')
+        .single();
+
+      if (insertError || !newProfile) {
+        fetchedProfile = { role: 'buyer', is_active: true, suspended_until: null } as typeof fetchedProfile;
+      } else {
+        fetchedProfile = newProfile;
+      }
     }
+
+    profile = fetchedProfile as typeof profile;
+    // Store in cache
+    profileCache.set(user.id, { profile: profile!, expiresAt: Date.now() + PROFILE_CACHE_TTL_MS });
   }
 
   // Type assertion for profile data
