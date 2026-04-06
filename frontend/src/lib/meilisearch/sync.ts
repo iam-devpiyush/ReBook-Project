@@ -67,7 +67,7 @@ export function buildListingDoc(l: any): ListingDocument {
       longitude: l.seller?.longitude ?? l.longitude ?? null,
     },
     // Store as Unix timestamp so Meilisearch sorts numerically, not lexicographically
-    created_at: l.created_at ? Math.floor(new Date(l.created_at).getTime() / 1000) : 0,
-    updated_at: l.updated_at ? Math.floor(new Date(l.updated_at).getTime() / 1000) : 0,
+    created_at: (l.created_at ? Math.floor(new Date(l.created_at).getTime() / 1000) : 0) as unknown as string,
+    updated_at: (l.updated_at ? Math.floor(new Date(l.updated_at).getTime() / 1000) : 0) as unknown as string,
   };
 }
