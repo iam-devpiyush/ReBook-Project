@@ -24,7 +24,8 @@ function createAdminClient() {
 
 // ── In-memory profile cache (per serverless instance) ────────────────────────
 // Avoids a DB round-trip on every API call for the same user within a 60s window.
-const profileCache = new Map<string, { profile: { role: string; is_active: boolean; suspended_until: string | null }; expiresAt: number }>();
+type CachedProfile = { role: 'buyer' | 'seller' | 'admin'; is_active: boolean; suspended_until: string | null };
+const profileCache = new Map<string, { profile: CachedProfile; expiresAt: number }>();
 const PROFILE_CACHE_TTL_MS = 60_000; // 60 seconds
 
 /**
@@ -72,20 +73,20 @@ export async function getUser(_request: NextRequest): Promise<MiddlewareResult> 
 
   // Check cache first to avoid a DB round-trip on every request
   const cached = profileCache.get(user.id);
-  let profile: { role: 'buyer' | 'seller' | 'admin'; is_active: boolean; suspended_until: string | null } | null = null;
+  let profile: CachedProfile | null = null;
 
   if (cached && cached.expiresAt > Date.now()) {
-    profile = cached.profile as typeof profile;
+    profile = cached.profile;
   } else {
-    let { data: fetchedProfile, error: profileError } = await adminClient
+    const { data: fetchedProfile, error: profileError } = await adminClient
       .from('users')
       .select('role, is_active, suspended_until')
       .eq('id', user.id)
       .single();
 
-    // If profile doesn't exist yet (new OAuth user), create it with default role
     if (profileError || !fetchedProfile) {
-      const { data: newProfile, error: insertError } = await adminClient
+      // Profile doesn't exist yet (new OAuth user) — upsert with default role
+      const { data: newProfile } = await adminClient
         .from('users')
         .upsert({
           id: user.id,
@@ -100,24 +101,22 @@ export async function getUser(_request: NextRequest): Promise<MiddlewareResult> 
         .select('role, is_active, suspended_until')
         .single();
 
-      if (insertError || !newProfile) {
-        fetchedProfile = { role: 'buyer', is_active: true, suspended_until: null } as typeof fetchedProfile;
-      } else {
-        fetchedProfile = newProfile;
-      }
+      profile = newProfile
+        ? { role: (newProfile as any).role ?? 'buyer', is_active: (newProfile as any).is_active ?? true, suspended_until: (newProfile as any).suspended_until ?? null }
+        : { role: 'buyer', is_active: true, suspended_until: null };
+    } else {
+      profile = {
+        role: (fetchedProfile as any).role ?? 'buyer',
+        is_active: (fetchedProfile as any).is_active ?? true,
+        suspended_until: (fetchedProfile as any).suspended_until ?? null,
+      };
     }
 
-    profile = fetchedProfile as typeof profile;
-    // Store in cache
-    profileCache.set(user.id, { profile: profile!, expiresAt: Date.now() + PROFILE_CACHE_TTL_MS });
+    profileCache.set(user.id, { profile, expiresAt: Date.now() + PROFILE_CACHE_TTL_MS });
   }
 
-  // Type assertion for profile data
-  const userProfile = profile as {
-    role: 'buyer' | 'seller' | 'admin';
-    is_active: boolean;
-    suspended_until: string | null;
-  };
+  // userProfile is guaranteed non-null here
+  const userProfile = profile as CachedProfile;
 
   // Check if user is suspended
   if (userProfile.suspended_until) {
