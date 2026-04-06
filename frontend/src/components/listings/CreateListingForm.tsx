@@ -57,6 +57,9 @@ export default function CreateListingForm() {
   const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // User-editable price — starts as AI-detected price, user can override
+  const [userPrice, setUserPrice] = useState<string>('');
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   const [manual, setManual] = useState<ManualFields>({
     category_id: '',
@@ -132,6 +135,9 @@ export default function CreateListingForm() {
         price_source: json.result.price_source ?? json.result.book_metadata?.price_source ?? null,
         official_cover_image: json.result.official_cover_image ?? json.result.book_metadata?.cover_image ?? null,
       });
+      // Pre-fill user price with AI-detected price
+      const detectedPrice = json.result.original_price ?? json.result.book_metadata?.original_price ?? null;
+      if (detectedPrice) setUserPrice(String(detectedPrice));
     } catch (err: any) {
       if (err.name === 'AbortError') {
         setScanError('Request timed out. Please check your connection and try again.');
@@ -160,10 +166,19 @@ export default function CreateListingForm() {
 
   const handleCalculatePricing = async () => {
     if (!validateManual()) return;
-    if (!scanResult?.original_price) {
-      setFormError('Could not determine the original price. Please rescan with a clearer back cover, or try a book with a visible ISBN barcode.');
+
+    // Validate user-entered price
+    const parsedPrice = parseFloat(userPrice);
+    if (!userPrice || isNaN(parsedPrice) || parsedPrice < 1) {
+      setPriceError('Please enter a valid original price (MRP) for this book.');
       return;
     }
+    if (parsedPrice > 50000) {
+      setPriceError('Price seems too high. Please enter the correct MRP.');
+      return;
+    }
+    setPriceError(null);
+
     setCalculatingPrice(true);
     setFormError(null);
     const controller = new AbortController();
@@ -174,8 +189,8 @@ export default function CreateListingForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          original_price: scanResult.original_price,
-          condition_score: scanResult.condition_analysis.overall_score,
+          original_price: parsedPrice,
+          condition_score: scanResult!.condition_analysis.overall_score,
           seller_location: location,
           buyer_location: location,
           weight: 0.5,
@@ -184,6 +199,8 @@ export default function CreateListingForm() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Pricing failed');
+      // Update scanResult with the final price (user may have changed it)
+      setScanResult(prev => prev ? { ...prev, original_price: parsedPrice } : prev);
       setPricingBreakdown(json.data);
       setStep(4);
     } catch (err: any) {
@@ -454,17 +471,60 @@ export default function CreateListingForm() {
             </div>
           </div>
 
-          {/* ── Price missing warning ── */}
-          {!scanResult.original_price && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 text-sm text-amber-800">
-              <p className="font-semibold mb-1">⚠️ Original price not found</p>
-              <p>The AI could not detect the MRP from the images or online databases. Please rescan with a clearer photo of the back cover showing the price barcode, or the price sticker.</p>
-              <button onClick={() => handleImagesComplete(uploadedImages!)}
-                className="mt-3 px-4 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg hover:bg-amber-700">
-                Rescan Book
-              </button>
+          {/* ── Price entry / edit section ── */}
+          <div className={`rounded-xl p-4 mb-5 text-sm ${
+            scanResult.original_price
+              ? 'bg-green-50 border border-green-200'
+              : 'bg-amber-50 border border-amber-200'
+          }`}>
+            {scanResult.original_price ? (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-semibold text-green-800">
+                    ✅ Original Price (MRP) detected
+                    <span className="ml-2 text-xs font-normal text-green-600">
+                      {scanResult.price_source === 'cover_price' ? '— read from cover' :
+                       scanResult.price_source === 'online' ? '— found online' : ''}
+                    </span>
+                  </p>
+                </div>
+                <p className="text-xs text-green-700 mb-3">You can correct it if it looks wrong.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-amber-800 mb-1">⚠️ Original price not found</p>
+                <p className="text-amber-700 text-xs mb-3">
+                  The AI couldn't detect the MRP from the images or online. Please enter it manually — check the back cover, price sticker, or the publisher's website.
+                </p>
+              </>
+            )}
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              Original Price / MRP (₹) <span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500 font-medium">₹</span>
+              <input
+                type="number"
+                min="1"
+                max="50000"
+                value={userPrice}
+                onChange={e => { setUserPrice(e.target.value); setPriceError(null); }}
+                placeholder="e.g. 499"
+                className={`flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 ${
+                  priceError ? 'border-red-400' : 'border-gray-300'
+                }`}
+              />
             </div>
-          )}
+            {priceError && <p className="mt-1 text-xs text-red-600">{priceError}</p>}
+            {!scanResult.original_price && (
+              <button
+                onClick={() => handleImagesComplete(uploadedImages!)}
+                className="mt-3 text-xs text-amber-700 underline hover:text-amber-900"
+              >
+                Try rescanning with a clearer back cover photo →
+              </button>
+            )}
+          </div>
 
           {/* ── Manual fields ── */}
           <div className="space-y-4">
@@ -551,9 +611,9 @@ export default function CreateListingForm() {
             </button>
             <button
               onClick={handleCalculatePricing}
-              disabled={calculatingPrice || !scanResult.original_price}
+              disabled={calculatingPrice}
               className={`flex-1 py-2 rounded-lg text-sm font-semibold ${
-                calculatingPrice || !scanResult.original_price
+                calculatingPrice
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   : 'bg-green-600 text-white hover:bg-green-700'
               }`}

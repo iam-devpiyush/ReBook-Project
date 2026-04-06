@@ -300,7 +300,6 @@ export async function GET(request: NextRequest) {
       },
       processing_time_ms: elapsedMs,
       cached: false,
-      _debug: { usedFallback, firstTitle: groupedHits[0]?.title ?? null, totalFromSource: searchResult.estimatedTotalHits },
       ...(usedFallback && { fallback: true, fallback_reason: fallbackReason }),
     };
 
