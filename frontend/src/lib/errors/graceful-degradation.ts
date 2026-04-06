@@ -79,10 +79,10 @@ export async function withMeilisearchFallback<T>(
     supabaseFallback: () => Promise<T>
 ): Promise<SearchFallbackResult<T>> {
     try {
-        // 5s timeout on Meilisearch — if it's cold/slow, fall through immediately
+        // 12s timeout on Meilisearch — SGP region can be slow from Vercel US-East on cold start
         const data = await withTimeout(
             withRetry(meilisearchFn, { maxAttempts: 1, baseDelayMs: 0 }),
-            5000,
+            12000,
             'Meilisearch'
         );
         return { data, usedFallback: false };

@@ -23,6 +23,9 @@
         },
         "app/api/listings/route.ts": {
             "maxDuration": 15
+        },
+        "app/api/search/route.ts": {
+            "maxDuration": 25
         }
     },
     "headers": [

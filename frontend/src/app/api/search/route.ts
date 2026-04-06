@@ -264,7 +264,7 @@ export async function GET(request: NextRequest) {
             }
           )
         ),
-        10_000,
+        20_000,
         'search'
       );
 
