@@ -67,7 +67,7 @@ export async function PUT(
       .select(`
         *,
         book:books(id, title, author, isbn, publisher, subject, description, category_id),
-        seller:users!seller_id(id, name, email)
+        seller:users!listings_seller_id_fkey(id, name, email, city, state, pincode, latitude, longitude)
       `)
       .single();
 
@@ -88,41 +88,50 @@ export async function PUT(
       console.error('Moderation log failed:', e);
     }
 
-    // Add to Meilisearch index (non-fatal)
-    try {
-      const meili = getMeiliClient();
-      const index = meili.index('listings');
-      const doc = {
-        id: updated.id,
-        book_id: updated.book_id,
-        seller_id: updated.seller_id,
-        title: updated.book?.title ?? '',
-        author: updated.book?.author ?? '',
-        subject: updated.book?.subject ?? undefined,
-        isbn: updated.book?.isbn ?? undefined,
-        publisher: updated.book?.publisher ?? undefined,
-        description: updated.book?.description ?? undefined,
-        status: 'active',
-        category_id: updated.book?.category_id ?? '',
-        condition_score: updated.condition_score,
-        final_price: updated.final_price,
-        original_price: updated.original_price,
-        delivery_cost: updated.delivery_cost,
-        images: updated.images,
-        location: {
-          city: updated.city ?? '',
-          state: updated.state ?? '',
-          pincode: updated.pincode ?? '',
-          latitude: updated.latitude ?? undefined,
-          longitude: updated.longitude ?? undefined,
-        },
-        created_at: updated.created_at,
-        updated_at: updated.updated_at,
-      };
-      await index.addDocuments([doc]);
-      console.info(`[approve] Added listing ${listingId} to Meilisearch`);
-    } catch (indexErr) {
-      console.error('[approve] Meilisearch indexing failed (non-fatal):', indexErr);
+    // Sync to Meilisearch — retry once on failure
+    const meiliDoc = {
+      id: updated.id,
+      book_id: updated.book_id,
+      seller_id: updated.seller_id,
+      title: updated.book?.title ?? '',
+      author: updated.book?.author ?? '',
+      subject: updated.book?.subject ?? null,
+      isbn: updated.book?.isbn ?? null,
+      publisher: updated.book?.publisher ?? null,
+      description: updated.book?.description ?? null,
+      status: 'active',
+      category_id: updated.book?.category_id ?? '',
+      condition_score: updated.condition_score,
+      final_price: updated.final_price,
+      original_price: updated.original_price,
+      delivery_cost: updated.delivery_cost,
+      images: updated.images ?? [],
+      location: {
+        city: updated.seller?.city ?? updated.city ?? '',
+        state: updated.seller?.state ?? updated.state ?? '',
+        pincode: updated.seller?.pincode ?? updated.pincode ?? '',
+        latitude: updated.seller?.latitude ?? updated.latitude ?? null,
+        longitude: updated.seller?.longitude ?? updated.longitude ?? null,
+      },
+      created_at: updated.created_at,
+      updated_at: updated.updated_at,
+    };
+
+    let meiliSynced = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const meili = getMeiliClient();
+        await meili.index('listings').addDocuments([meiliDoc]);
+        console.info(`[approve] Meilisearch sync OK for listing ${listingId} (attempt ${attempt})`);
+        meiliSynced = true;
+        break;
+      } catch (indexErr) {
+        console.error(`[approve] Meilisearch sync attempt ${attempt} failed:`, indexErr);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 500 * attempt));
+      }
+    }
+    if (!meiliSynced) {
+      console.error(`[approve] Meilisearch sync FAILED after 3 attempts for listing ${listingId} — listing is active in DB but won't appear in search until next reindex`);
     }
 
     return NextResponse.json({ success: true, data: updated, message: 'Listing approved successfully' });
