@@ -274,6 +274,7 @@ export async function GET(request: NextRequest) {
       searchResult = perfResult.result.data;
       usedFallback = perfResult.result.usedFallback;
       fallbackReason = perfResult.result.fallbackReason;
+      console.log(`[search] usedFallback=${usedFallback} firstTitle="${searchResult.hits[0]?.title}" totalHits=${searchResult.estimatedTotalHits}`);
     } catch (err) {
       // Both Meilisearch and Supabase timed out — return empty results immediately
       console.error('[Search] Hard timeout hit, returning empty results:', err);
@@ -296,6 +297,7 @@ export async function GET(request: NextRequest) {
       },
       processing_time_ms: elapsedMs,
       cached: false,
+      _debug: { usedFallback, firstTitle: groupedHits[0]?.title ?? null, totalFromSource: searchResult.estimatedTotalHits },
       ...(usedFallback && { fallback: true, fallback_reason: fallbackReason }),
     };
 
