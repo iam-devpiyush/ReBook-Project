@@ -85,6 +85,29 @@ export async function POST(request: NextRequest) {
           .update({ status: 'payment_failed', updated_at: new Date().toISOString() })
           .eq('id', orderId);
 
+        // Restore listing to active so it can be purchased again
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: order } = await (supabase as any)
+          .from('orders')
+          .select('listing_id')
+          .eq('id', orderId)
+          .single();
+
+        if (order?.listing_id) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase as any)
+            .from('listings')
+            .update({ status: 'active', updated_at: new Date().toISOString() })
+            .eq('id', order.listing_id)
+            .eq('status', 'sold'); // only restore if it was marked sold (not already active/rejected)
+
+          // Re-sync to Meilisearch so it appears in search again
+          const { syncListingToMeili } = await import('@/lib/meilisearch/sync');
+          syncListingToMeili(order.listing_id).catch((err: unknown) =>
+            console.error('[webhook] Meilisearch re-sync failed after payment failure:', err)
+          );
+        }
+
         await supabase.channel(`order:${orderId}`).send({
           type: 'broadcast',
           event: 'payment.failed',

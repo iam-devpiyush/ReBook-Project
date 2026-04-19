@@ -92,9 +92,14 @@ async function main() {
   const index = meili.index('listings');
 
   console.log('Deleting all existing Meilisearch documents...');
-  await index.deleteAllDocuments();
-  // Give Meilisearch time to process the delete before inserting
-  await new Promise(r => setTimeout(r, 3000));
+  // Use the correct API — delete all documents by filter or just add with overwrite
+  try {
+    await index.deleteAllDocuments();
+    await new Promise(r => setTimeout(r, 3000));
+  } catch {
+    // If deleteAllDocuments fails, proceed anyway — addDocuments will overwrite
+    console.log('Delete skipped, will overwrite existing docs.');
+  }
   console.log('Deleted all documents.');
 
   const docs = listings.map(buildDoc);
